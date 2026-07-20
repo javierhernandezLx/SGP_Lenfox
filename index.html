@@ -197,12 +197,15 @@ dialog.modal::backdrop{background:rgba(0,0,0,.52);backdrop-filter:blur(3px);}
   width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:14px;
   display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .modal-close:hover{background:rgba(255,255,255,.3);}
-/* min-height:0 — sin esto Safari no deja que este hijo flex (columna) se encoja por
-   debajo de la altura de su contenido dentro de un <dialog> sin alto fijo, así que en vez
-   de mostrar el contenido y, si hiciera falta, scrollear, lo colapsa casi a 0 de alto
-   (confirmado con el inspector de Safari: el contenido SÍ estaba en el DOM, solo que
-   desplazado fuera de la vista). */
-.modal-body{padding:16px 18px;overflow-y:auto;flex:1;min-width:0;min-height:0;}
+/* flex:1 1 auto (NO flex:1, que implica flex-basis:0%) — con flex-basis:0% Safari calcula
+   el alto automático del <dialog> (que no tiene alto fijo) a partir de ese 0%, así que el
+   diálogo entero se queda casi sin espacio para el body aunque cada campo de dentro tenga
+   su tamaño correcto (confirmado con el inspector: un input medía 32px de alto por sí solo,
+   pero el .modal-body que lo contenía solo tenía ~40px en total). flex-basis:auto hace que
+   el tamaño del contenido SÍ cuente para el alto automático del diálogo. min-height:0 se
+   mantiene para permitir que, si aun así el contenido no cupiera en max-height:90vh, se
+   pueda encoger y activar el scroll interno en vez de desbordar. */
+.modal-body{padding:16px 18px;overflow-y:auto;flex:1 1 auto;min-width:0;min-height:0;}
 .modal-ftr{padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;flex-shrink:0;}
 
 /* min-width:0 — sin esto, Safari (y en menor medida otros navegadores) no encoge los
