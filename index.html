@@ -1,0 +1,2200 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panel de Administración — SGP Lenfox (Piloto web)</title>
+<!-- Piloto de publicación como app web (Fases 6-7 de SP-06-07): habla directamente con
+     Supabase vía supabase-js + Supabase Auth (sin pasar por Cowork ni por el conector MCP
+     de desarrollador), respetando Row Level Security con la sesión real del usuario. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+/* ── THEMING ─────────────────────────────── */
+:root {
+  color-scheme: light;
+  --bg:        #f0f4f8;
+  --surface:   #ffffff;
+  --surface2:  #f8fafc;
+  --text:      #1a2332;
+  --text2:     #475569;
+  --text3:     #94a3b8;
+  --border:    #e2e8f0;
+  --primary:   #2563eb;
+  --hdr:       linear-gradient(135deg,#1e3a5f 0%,#1d4ed8 100%);
+  --shadow:    0 1px 3px rgba(0,0,0,.07);
+  --shadow-md: 0 3px 10px rgba(0,0,0,.10);
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg:        #0f172a;
+  --surface:   #1e293b;
+  --surface2:  #263347;
+  --text:      #f1f5f9;
+  --text2:     #94a3b8;
+  --text3:     #64748b;
+  --border:    #334155;
+  --primary:   #3b82f6;
+  --hdr:       linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);
+  --shadow:    0 1px 3px rgba(0,0,0,.35);
+  --shadow-md: 0 3px 10px rgba(0,0,0,.4);
+}
+
+/* ── RESET ───────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:var(--bg);color:var(--text);font-size:14px;min-height:100vh;
+  transition:background .25s,color .25s;}
+
+/* ── HEADER ──────────────────────────────── */
+.header{background:var(--hdr);color:#fff;padding:10px 20px;
+  display:flex;align-items:center;justify-content:space-between;
+  box-shadow:0 2px 8px rgba(30,58,95,.3);flex-wrap:wrap;gap:8px;}
+.hdr-left{display:flex;align-items:center;gap:12px;}
+.avatar{width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.2);
+  border:2px solid rgba(255,255,255,.5);display:flex;align-items:center;
+  justify-content:center;font-size:19px;flex-shrink:0;}
+.hdr-title h1{font-size:16px;font-weight:700;letter-spacing:-.3px;}
+.hdr-title .sub{font-size:11px;opacity:.7;margin-top:1px;}
+.hdr-right{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+.btn-theme,.btn-refresh{border:none;padding:6px 13px;border-radius:6px;
+  font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:opacity .15s;}
+.btn-theme{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.25);}
+.btn-theme:hover{background:rgba(255,255,255,.25);}
+.btn-refresh{background:#fff;color:#1e3a5f;}
+.btn-refresh:hover:not(:disabled){background:#e8f0ff;}
+.btn-refresh:disabled{opacity:.5;cursor:not-allowed;}
+.last-upd{font-size:10px;opacity:.6;}
+.maint-toggle{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;
+  background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);
+  padding:5px 11px;border-radius:6px;cursor:pointer;user-select:none;transition:background .15s;}
+.maint-toggle:hover{background:rgba(255,255,255,.22);}
+.maint-toggle input{width:15px;height:15px;cursor:pointer;accent-color:#f59e0b;}
+.maint-toggle.on{background:#f59e0b;border-color:#f59e0b;color:#1a2332;}
+
+/* ── TABS (nivel página) ─────────────────── */
+.tabbar{background:var(--surface);border-bottom:1px solid var(--border);
+  display:flex;padding:0 20px;}
+.tabbtn{padding:12px 18px;font-size:13px;font-weight:700;color:var(--text3);
+  cursor:pointer;border-bottom:3px solid transparent;transition:color .12s,border-color .12s;}
+.tabbtn.active{color:var(--primary);border-bottom-color:var(--primary);}
+.tabbtn:hover:not(.active){color:var(--text2);}
+
+/* ── TOOLBAR ─────────────────────────────── */
+.toolbar{display:flex;gap:10px;align-items:center;padding:14px 20px 0;flex-wrap:wrap;}
+.toolbar input[type=text]{flex:1;min-width:220px;max-width:400px;}
+input[type=text],input[type=date],select{
+  border:1px solid var(--border);border-radius:6px;padding:7px 11px;
+  font-size:13px;background:var(--surface);color:var(--text);font-family:inherit;
+  transition:border-color .15s,background .25s,color .25s;}
+input:focus,select:focus{outline:none;border-color:var(--primary);
+  box-shadow:0 0 0 3px rgba(37,99,235,.12);}
+
+/* ── MAIN / CARD ─────────────────────────── */
+.main{padding:14px 20px 60px;}
+.tabpanel{display:none;}
+.tabpanel.visible{display:block;}
+.card{background:var(--surface);border-radius:10px;padding:15px;
+  box-shadow:var(--shadow);position:relative;overflow:hidden;margin-top:12px;}
+
+/* ── WATERMARK (idéntico a REQ-8/REQ-10) ─── */
+.watermark{position:absolute;bottom:8px;right:8px;width:160px;height:118px;
+  opacity:.15;pointer-events:none;z-index:0;}
+.watermark svg{width:100%;height:100%;}
+.card-content{position:relative;z-index:1;}
+
+/* ── USER LIST ───────────────────────────── */
+.user-row{display:flex;align-items:center;gap:12px;padding:11px 8px;
+  border-bottom:1px solid var(--border);cursor:pointer;border-radius:6px;transition:background .1s;}
+.user-row:hover{background:var(--surface2);}
+.user-row:last-child{border-bottom:none;}
+.user-av{width:36px;height:36px;border-radius:50%;background:var(--surface2);
+  display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;
+  color:var(--primary);flex-shrink:0;}
+.user-info{flex:1;min-width:0;}
+.user-name{font-size:13px;font-weight:700;color:var(--text);}
+.user-email{font-size:11px;color:var(--text3);}
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;margin-left:6px;}
+.badge-admin{background:#ede9fe;color:#6d28d9;}
+.badge-blocked{background:#fee2e2;color:#b91c1c;}
+.btn-edit{border:none;background:var(--surface2);color:var(--text2);width:30px;height:30px;
+  border-radius:6px;cursor:pointer;font-size:13px;flex-shrink:0;transition:background .12s;}
+.btn-edit:hover{background:var(--primary);color:#fff;}
+
+/* ── TREE (clientes / proyectos) ─────────── */
+.tree-client{border-bottom:1px solid var(--border);padding:6px 0;}
+.tree-client:last-child{border-bottom:none;}
+.tree-row{display:flex;align-items:center;gap:10px;padding:8px 8px;border-radius:6px;transition:background .1s;cursor:pointer;}
+.tree-row:hover{background:var(--surface2);}
+.tree-row.client-row{font-weight:700;}
+.tree-icon{font-size:15px;flex-shrink:0;}
+.tree-name{flex:1;min-width:0;font-size:13px;color:var(--text);}
+.tree-code{font-size:10px;color:var(--text3);font-weight:700;margin-left:4px;}
+.tree-projects{margin-left:30px;border-left:2px solid var(--border);padding-left:4px;overflow:hidden;}
+.tree-projects.collapsed{display:none;}
+.tree-toggle{width:18px;height:18px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+  font-size:11px;color:var(--text3);border-radius:4px;transition:background .12s,transform .12s;cursor:pointer;}
+.tree-toggle:hover{background:var(--border);color:var(--text2);}
+.tree-toggle.collapsed{transform:rotate(-90deg);}
+.tree-meta{font-size:11px;color:var(--text3);white-space:nowrap;}
+.tree-team{font-size:10.5px;color:var(--text3);white-space:nowrap;background:var(--surface2);
+  padding:2px 7px;border-radius:20px;font-weight:700;}
+.tree-empty{font-size:11px;color:var(--text3);font-style:italic;padding:4px 0 4px 44px;}
+.tree-roles-line{padding:0 8px 7px 34px;display:flex;gap:12px;flex-wrap:wrap;}
+.role-tag{font-size:10.5px;color:var(--text3);}
+.estado-badge{padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;white-space:nowrap;}
+.est-1{background:#e2e8f0;color:#475569;}
+.est-2{background:#fef3c7;color:#92400e;}
+.est-3{background:#ffedd5;color:#c2410c;}
+.est-4{background:#dcfce7;color:#15803d;}
+.badge-open{background:#dcfce7;color:#15803d;}
+.badge-closed{background:#e2e8f0;color:#475569;}
+
+/* ── TIME-LINE (calendario mensual tipo Gantt) ── */
+.tl-toolbar{display:flex;align-items:center;gap:8px;}
+.tl-month-label{font-size:13px;font-weight:700;color:var(--text);min-width:170px;text-align:center;text-transform:capitalize;}
+.tl-zoom-label{font-size:11px;font-weight:700;color:var(--text2);min-width:64px;text-align:center;}
+.tl-table{display:grid;grid-template-columns:220px 1fr;font-size:12px;}
+.tl-corner{border-bottom:1px solid var(--border);}
+.tl-daysheader{display:grid;border-bottom:1px solid var(--border);}
+.tl-day{font-size:9px;text-align:center;color:var(--text3);padding:4px 0;border-right:1px solid var(--border);}
+.tl-day.today{background:rgba(37,99,235,.10);font-weight:700;color:var(--primary);}
+.tl-rowlabel{padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;display:flex;flex-direction:column;justify-content:center;gap:1px;}
+.tl-rowlabel .tl-pname{font-weight:700;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;}
+.tl-rowlabel .tl-cname{font-size:10px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;}
+.tl-track{position:relative;border-bottom:1px solid var(--border);height:38px;}
+.tl-track-grid{position:absolute;inset:0;display:grid;}
+.tl-track-grid>div{border-right:1px solid var(--border);}
+.tl-bar{position:absolute;top:7px;height:24px;border-radius:5px;display:flex;align-items:center;
+  padding:0 8px;font-size:10.5px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;cursor:pointer;box-shadow:var(--shadow);min-width:6px;}
+.tl-legend{display:flex;gap:14px;flex-wrap:wrap;padding:0 0 10px 220px;font-size:11px;color:var(--text2);}
+.tl-legend-item{display:flex;align-items:center;gap:5px;}
+.tl-legend-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0;}
+
+/* ── MODALS (dialog nativo) ──────────────── */
+dialog.modal{border:none;border-radius:12px;padding:0;width:min(520px,94vw);
+  background:var(--surface);color:var(--text);box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden;
+  position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);margin:0;max-height:90vh;}
+dialog.modal.wide{width:min(760px,96vw);}
+dialog.modal[open]{display:flex;flex-direction:column;}
+dialog.modal::backdrop{background:rgba(0,0,0,.52);backdrop-filter:blur(3px);}
+.modal-hdr{padding:14px 18px;border-bottom:1px solid var(--border);
+  display:flex;justify-content:space-between;align-items:center;flex-shrink:0;background:var(--hdr);}
+.modal-hdr h2{font-size:15px;font-weight:700;color:#fff;}
+.modal-close{border:none;background:rgba(255,255,255,.15);color:#fff;
+  width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:14px;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.modal-close:hover{background:rgba(255,255,255,.3);}
+.modal-body{padding:16px 18px;overflow-y:auto;flex:1;}
+.modal-ftr{padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;flex-shrink:0;}
+
+.form-group{margin-bottom:12px;}
+.form-label{font-size:11px;font-weight:700;color:var(--text2);margin-bottom:4px;display:block;text-transform:uppercase;letter-spacing:.4px;}
+.form-control{width:100%;}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.check-row{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+.check-row input{width:16px;height:16px;cursor:pointer;}
+.check-row label{font-size:13px;color:var(--text);cursor:pointer;}
+
+.btn-action{padding:8px 16px;border:none;border-radius:6px;font-size:13px;font-weight:700;
+  cursor:pointer;font-family:inherit;transition:opacity .15s,transform .1s;}
+.btn-action:active{transform:scale(.98);}
+.btn-action:disabled{opacity:.5;cursor:not-allowed;}
+.btn-blue{background:#2563eb;color:#fff;}
+.btn-ghost{background:var(--surface2);color:var(--text2);}
+.btn-sm{padding:6px 12px;font-size:12px;}
+
+.feedback{margin-top:10px;padding:7px 12px;border-radius:6px;font-size:12px;text-align:center;display:none;}
+.fb-ok{background:#dcfce7;color:#15803d;}
+.fb-err{background:#fee2e2;color:#b91c1c;}
+
+/* ── PANTALLA DE LOGIN (Supabase Auth) ───── */
+.auth-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);padding:20px;}
+.auth-card{width:min(380px,100%);background:var(--surface);border-radius:12px;box-shadow:var(--shadow-md);padding:30px 28px;}
+.auth-card h1{font-size:19px;margin:0 0 4px;color:var(--text);}
+.auth-sub{font-size:12.5px;color:var(--text3);margin:0 0 20px;line-height:1.4;}
+.auth-toggle{text-align:center;margin-top:14px;font-size:12.5px;}
+.auth-toggle a{color:var(--primary);text-decoration:none;cursor:pointer;}
+.auth-toggle a:hover{text-decoration:underline;}
+.hdr-user{font-size:12px;color:var(--text2);margin-right:4px;}
+
+/* ── ROLES (dentro del modal de proyecto) ── */
+.roles-section{border-top:1px solid var(--border);margin-top:6px;padding-top:12px;}
+.roles-title{font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;}
+.role-cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+.role-col-title{font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px;}
+.chip-list{display:flex;flex-wrap:wrap;gap:5px;min-height:22px;margin-bottom:8px;}
+.chip{display:inline-flex;align-items:center;gap:5px;background:var(--surface2);
+  border-radius:14px;padding:3px 4px 3px 10px;font-size:11px;color:var(--text);}
+.chip button{border:none;background:rgba(148,163,184,.3);color:var(--text2);width:16px;height:16px;
+  border-radius:50%;cursor:pointer;font-size:10px;line-height:1;flex-shrink:0;}
+.chip button:hover{background:#dc2626;color:#fff;}
+.role-add{display:flex;gap:4px;}
+.role-add select{flex:1;font-size:11px;padding:5px 6px;}
+.role-add button{border:none;background:var(--primary);color:#fff;width:26px;height:26px;
+  border-radius:6px;cursor:pointer;font-size:14px;flex-shrink:0;}
+.role-add button:disabled{opacity:.4;cursor:not-allowed;}
+.roles-locked{font-size:12px;color:var(--text3);font-style:italic;padding:10px 0;text-align:center;}
+
+/* ── CONTRATOS (lista dentro del modal de proyecto Ejecución) ── */
+.contrato-row{display:flex;align-items:center;gap:10px;padding:8px 8px;border-radius:6px;
+  cursor:pointer;transition:background .1s;border-bottom:1px solid var(--border);}
+.contrato-row:hover{background:var(--surface2);}
+.contrato-row:last-child{border-bottom:none;}
+.contrato-name{flex:1;min-width:0;font-size:13px;font-weight:700;color:var(--text);}
+.contrato-meta{font-size:11px;color:var(--text3);white-space:nowrap;}
+
+/* ── LOADING / EMPTY ─────────────────────── */
+.loader{text-align:center;padding:50px 20px;color:var(--text2);}
+.spinner{width:26px;height:26px;margin:0 auto 12px;
+  border:3px solid var(--border);border-top-color:var(--primary);
+  border-radius:50%;animation:spin .75s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.empty-msg{text-align:center;padding:28px;color:var(--text3);font-size:13px;}
+</style>
+</head>
+<body>
+
+<!-- ══ PANTALLA DE LOGIN (Supabase Auth) ═══ -->
+<div class="auth-screen" id="authScreen">
+  <div class="auth-card">
+    <h1>SGP Lenfox — REQ-17</h1>
+    <p class="auth-sub">Piloto de publicación web. Inicia sesión con tu cuenta de Lenfox (mismo email que en el panel).</p>
+    <div class="form-group"><label class="form-label">Email</label><input class="form-control" type="email" id="authEmail" autocomplete="email"></div>
+    <div class="form-group"><label class="form-label">Contraseña</label><input class="form-control" type="password" id="authPassword" autocomplete="current-password"></div>
+    <div class="feedback" id="authFeedback"></div>
+    <button class="btn-action btn-blue" id="btnAuthSubmit" onclick="submitAuth()" style="width:100%">Iniciar sesión</button>
+    <div class="auth-toggle"><a id="authToggleLink" onclick="toggleAuthMode();return false;" href="#">¿Primera vez? Crear cuenta</a></div>
+  </div>
+</div>
+
+<div id="appRoot" style="display:none">
+<!-- ══ HEADER ══════════════════════════════ -->
+<div class="header">
+  <div class="hdr-left">
+    <div class="avatar">🛠️</div>
+    <div class="hdr-title">
+      <div class="sub">SGP Lenfox &middot; REQ-17 (Piloto web)</div>
+      <h1>Panel de Administraci&oacute;n</h1>
+    </div>
+  </div>
+  <div class="hdr-right">
+    <label class="maint-toggle" id="maintLabel" title="Modo mantenimiento global. Pausa REQ-8/REQ-10 y las tareas programadas del SGP cuando se autorice esa integración (ver REQ-17).">
+      <input type="checkbox" id="maintCheck" onchange="toggleMaintenance()">
+      <span>&#128679; Modo mantenimiento</span>
+    </label>
+    <span class="last-upd" id="lastUpd"></span>
+    <span class="hdr-user" id="currentUserEmail"></span>
+    <button class="btn-theme" id="btnTheme" onclick="toggleTheme()">&#127769; Oscuro</button>
+    <button class="btn-refresh" id="btnRefresh" onclick="refreshPanel()">&#8635; Actualizar</button>
+    <button class="btn-refresh" id="btnLogout" onclick="doLogout()">&#128274; Salir</button>
+  </div>
+</div>
+<div style="background:#f59e0b;color:#1a2332;text-align:center;padding:8px 14px;font-size:12.5px;font-weight:700;letter-spacing:.2px;">
+  &#9888; PILOTO — publicación web de REQ-17 (Fases 6-7 de SP-06-07). Conectado directamente a Supabase con tu sesión real. No sustituye aún al panel de producción en Notion.
+</div>
+
+<!-- ══ TABS ════════════════════════════════ -->
+<div class="tabbar">
+  <div class="tabbtn active" id="tabbtn-usuarios" onclick="switchTab('usuarios')">&#128100; Mantenimiento de Usuarios</div>
+  <div class="tabbtn" id="tabbtn-proyectos" onclick="switchTab('proyectos')">&#127970; Mantenimiento de Proyectos</div>
+  <div class="tabbtn" id="tabbtn-timeline" onclick="switchTab('timeline')">&#128197; Time-Line</div>
+  <div class="tabbtn" id="tabbtn-vacaciones" onclick="switchTab('vacaciones')">&#127958; Vacaciones</div>
+  <div class="tabbtn" id="tabbtn-sprints" onclick="switchTab('sprints')">&#127939; Sprints</div>
+</div>
+
+<div class="main">
+  <div class="loader" id="loadingDiv"><div class="spinner"></div>Cargando panel de administraci&oacute;n&hellip;</div>
+
+  <!-- ══ PANEL USUARIOS ══════════════════════ -->
+  <div class="tabpanel visible" id="panel-usuarios" style="display:none">
+    <div class="toolbar">
+      <input type="text" id="userSearch" placeholder="&#128269; Buscar por nombre o email&hellip;" oninput="renderUsuarios()">
+      <button class="btn-action btn-blue btn-sm" onclick="openUserModal(null)">+ Nuevo usuario</button>
+    </div>
+    <div class="card">
+      <div class="watermark"><svg viewBox="0 0 220 160" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="130" cy="95"  r="48" fill="#a8d4e8"/><circle cx="62" cy="115" r="30" fill="#a8d4e8"/>
+        <circle cx="180" cy="42"  r="24" fill="#bee2f0"/><circle cx="28" cy="42"  r="19" fill="#bee2f0"/>
+        <circle cx="162" cy="118" r="17" fill="#bee2f0"/><circle cx="95" cy="28"  r="15" fill="#c8dce5"/>
+        <circle cx="195" cy="125" r="11" fill="#b0c8d5"/><circle cx="8"  cy="92"  r="11" fill="#bee2f0"/>
+        <circle cx="148" cy="18"  r="9"  fill="#b0c8d5"/><circle cx="50" cy="70"  r="8"  fill="#bee2f0"/>
+      </svg></div>
+      <div class="card-content" id="usersList"></div>
+    </div>
+  </div>
+
+  <!-- ══ PANEL PROYECTOS ═════════════════════ -->
+  <div class="tabpanel" id="panel-proyectos" style="display:none">
+    <div class="toolbar">
+      <input type="text" id="treeSearch" placeholder="&#128269; Buscar cliente o proyecto&hellip;" oninput="renderTree()">
+      <select id="estadoFilter" onchange="renderTree()">
+        <option value="">Todos los estados</option>
+        <option value="1. Nuevo">1. Nuevo</option>
+        <option value="2. Planificando">2. Planificando</option>
+        <option value="3. En Ejecución">3. En Ejecución</option>
+        <option value="4. Cerrado">4. Cerrado</option>
+      </select>
+      <button class="btn-action btn-ghost btn-sm" onclick="openClientModal(null)">+ Nuevo cliente</button>
+      <button class="btn-action btn-blue btn-sm" onclick="openProjectModal(null,null)">+ Nuevo proyecto</button>
+    </div>
+    <div class="card">
+      <div class="watermark"><svg viewBox="0 0 220 160" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="130" cy="95"  r="48" fill="#a8d4e8"/><circle cx="62" cy="115" r="30" fill="#a8d4e8"/>
+        <circle cx="180" cy="42"  r="24" fill="#bee2f0"/><circle cx="28" cy="42"  r="19" fill="#bee2f0"/>
+        <circle cx="162" cy="118" r="17" fill="#bee2f0"/><circle cx="95" cy="28"  r="15" fill="#c8dce5"/>
+        <circle cx="195" cy="125" r="11" fill="#b0c8d5"/><circle cx="8"  cy="92"  r="11" fill="#bee2f0"/>
+        <circle cx="148" cy="18"  r="9"  fill="#b0c8d5"/><circle cx="50" cy="70"  r="8"  fill="#bee2f0"/>
+      </svg></div>
+      <div class="card-content" id="treeView"></div>
+    </div>
+  </div>
+
+  <!-- ══ PANEL TIME-LINE ═════════════════════ -->
+  <div class="tabpanel" id="panel-timeline" style="display:none">
+    <div class="toolbar">
+      <div class="tl-toolbar">
+        <button class="btn-action btn-ghost btn-sm" onclick="timelineNav(-1)">&#8249;</button>
+        <span class="tl-month-label" id="timelineMonthLabel"></span>
+        <button class="btn-action btn-ghost btn-sm" onclick="timelineNav(1)">&#8250;</button>
+        <button class="btn-action btn-ghost btn-sm" onclick="timelineToday()">Hoy</button>
+      </div>
+      <div class="tl-toolbar" style="margin-left:auto">
+        <button class="btn-action btn-ghost btn-sm" id="btnTlZoomOut" onclick="timelineZoomOut()" title="Alejar (menos detalle: semana → mes → trimestre → año)">&#8722;</button>
+        <span class="tl-zoom-label" id="timelineZoomLabel">Mes</span>
+        <button class="btn-action btn-ghost btn-sm" id="btnTlZoomIn" onclick="timelineZoomIn()" title="Acercar (más detalle: año → trimestre → mes → semana)">&#43;</button>
+      </div>
+      <select id="timelineEstadoFilter" onchange="renderTimeline()">
+        <option value="">Todos los estados</option>
+        <option value="1. Nuevo">1. Nuevo</option>
+        <option value="2. Planificando">2. Planificando</option>
+        <option value="3. En Ejecución">3. En Ejecución</option>
+        <option value="4. Cerrado">4. Cerrado</option>
+      </select>
+    </div>
+    <div class="card" style="overflow-x:auto">
+      <div class="watermark"><svg viewBox="0 0 220 160" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="130" cy="95"  r="48" fill="#a8d4e8"/><circle cx="62" cy="115" r="30" fill="#a8d4e8"/>
+        <circle cx="180" cy="42"  r="24" fill="#bee2f0"/><circle cx="28" cy="42"  r="19" fill="#bee2f0"/>
+        <circle cx="162" cy="118" r="17" fill="#bee2f0"/><circle cx="95" cy="28"  r="15" fill="#c8dce5"/>
+        <circle cx="195" cy="125" r="11" fill="#b0c8d5"/><circle cx="8"  cy="92"  r="11" fill="#bee2f0"/>
+        <circle cx="148" cy="18"  r="9"  fill="#b0c8d5"/><circle cx="50" cy="70"  r="8"  fill="#bee2f0"/>
+      </svg></div>
+      <div class="card-content" id="timelineView" style="min-width:900px"></div>
+    </div>
+  </div>
+
+  <!-- ══ PANEL VACACIONES ═════════════════════ -->
+  <div class="tabpanel" id="panel-vacaciones" style="display:none">
+    <div class="toolbar">
+      <div class="tl-toolbar">
+        <button class="btn-action btn-ghost btn-sm" onclick="vacNav(-1)">&#8249;</button>
+        <span class="tl-month-label" id="vacMonthLabel"></span>
+        <button class="btn-action btn-ghost btn-sm" onclick="vacNav(1)">&#8250;</button>
+        <button class="btn-action btn-ghost btn-sm" onclick="vacToday()">Hoy</button>
+      </div>
+      <div class="tl-toolbar" style="margin-left:auto">
+        <button class="btn-action btn-ghost btn-sm" id="btnVacZoomOut" onclick="vacZoomOut()" title="Alejar (menos detalle)">&#8722;</button>
+        <span class="tl-zoom-label" id="vacZoomLabel">Día</span>
+        <button class="btn-action btn-ghost btn-sm" id="btnVacZoomIn" onclick="vacZoomIn()" title="Acercar (más detalle)">&#43;</button>
+      </div>
+      <select id="vacPersonaFilter" onchange="renderVacTimeline()">
+        <option value="">Todas las personas</option>
+      </select>
+    </div>
+    <div class="card" style="overflow-x:auto">
+      <div class="watermark"><svg viewBox="0 0 220 160" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="130" cy="95"  r="48" fill="#a8d4e8"/><circle cx="62" cy="115" r="30" fill="#a8d4e8"/>
+        <circle cx="180" cy="42"  r="24" fill="#bee2f0"/><circle cx="28" cy="42"  r="19" fill="#bee2f0"/>
+        <circle cx="162" cy="118" r="17" fill="#bee2f0"/><circle cx="95" cy="28"  r="15" fill="#c8dce5"/>
+        <circle cx="195" cy="125" r="11" fill="#b0c8d5"/><circle cx="8"  cy="92"  r="11" fill="#bee2f0"/>
+        <circle cx="148" cy="18"  r="9"  fill="#b0c8d5"/><circle cx="50" cy="70"  r="8"  fill="#bee2f0"/>
+      </svg></div>
+      <div class="card-content" id="vacTimelineView" style="min-width:900px"></div>
+    </div>
+  </div>
+
+  <!-- ══ PANEL SPRINTS ═══════════════════════ -->
+  <div class="tabpanel" id="panel-sprints" style="display:none">
+    <div class="card" style="margin-bottom:14px;background:var(--bg2, #f8fafc);border:1px dashed var(--border, #cbd5e1);">
+      <div class="card-content" style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;">
+        <div class="form-group" style="margin:0">
+          <label class="form-label">&#128295; Crear pr&oacute;ximos sprints semanales</label>
+          <div style="font-size:11.5px;color:var(--text3);max-width:520px;margin-bottom:6px">
+            Genera sprints con c&oacute;digo <code>yyyy_sNN</code> (a&ntilde;o + n&uacute;mero de semana ISO) a partir de hoy, en estado Abierto. Si un c&oacute;digo ya existe, se omite.
+          </div>
+        </div>
+        <div class="form-group" style="margin:0;width:100px">
+          <label class="form-label">Semanas</label>
+          <input class="form-control" type="number" id="sprintGenCount" min="1" max="52" value="8">
+        </div>
+        <button class="btn-action btn-blue btn-sm" onclick="generarSprints()" id="btnGenSprints">+ Crear sprints</button>
+        <div class="feedback" id="sprintGenFeedback" style="display:none;flex-basis:100%"></div>
+      </div>
+    </div>
+    <div class="toolbar">
+      <input type="text" id="sprintSearch" placeholder="&#128269; Buscar por c&oacute;digo&hellip;" oninput="renderSprints()">
+      <select id="sprintEstadoFilter" onchange="renderSprints()">
+        <option value="">Todos los estados</option>
+        <option value="Abierto">Abierto</option>
+        <option value="Cerrado">Cerrado</option>
+      </select>
+      <button class="btn-action btn-blue btn-sm" onclick="openSprintModal(null)">+ Nuevo sprint</button>
+    </div>
+    <div class="card">
+      <div class="watermark"><svg viewBox="0 0 220 160" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="130" cy="95"  r="48" fill="#a8d4e8"/><circle cx="62" cy="115" r="30" fill="#a8d4e8"/>
+        <circle cx="180" cy="42"  r="24" fill="#bee2f0"/><circle cx="28" cy="42"  r="19" fill="#bee2f0"/>
+        <circle cx="162" cy="118" r="17" fill="#bee2f0"/><circle cx="95" cy="28"  r="15" fill="#c8dce5"/>
+        <circle cx="195" cy="125" r="11" fill="#b0c8d5"/><circle cx="8"  cy="92"  r="11" fill="#bee2f0"/>
+        <circle cx="148" cy="18"  r="9"  fill="#b0c8d5"/><circle cx="50" cy="70"  r="8"  fill="#bee2f0"/>
+      </svg></div>
+      <div class="card-content" id="sprintsList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL USUARIO ═══════════════════════ -->
+<dialog class="modal" id="userModal">
+  <div class="modal-hdr"><h2 id="userModalTitle">Nuevo usuario</h2>
+    <button class="modal-close" onclick="closeModal('userModal')">&#10005;</button></div>
+  <div class="modal-body">
+    <div class="two-col">
+      <div class="form-group"><label class="form-label">Nombre *</label><input class="form-control" type="text" id="uNombre"></div>
+      <div class="form-group"><label class="form-label">Apellidos</label><input class="form-control" type="text" id="uApellidos"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Email *</label><input class="form-control" type="text" id="uEmail" placeholder="nombre@lenfox.com"></div>
+    <div class="check-row"><input type="checkbox" id="uAdmin"><label for="uAdmin">Administrador del sistema (acceso al Panel de administración)</label></div>
+    <div class="check-row"><input type="checkbox" id="uBloqueado"><label for="uBloqueado">Cuenta bloqueada (sin acceso a REQ-8/REQ-10 cuando se autorice la integración)</label></div>
+    <div class="feedback" id="userFeedback"></div>
+  </div>
+  <div class="modal-ftr">
+    <button class="btn-action btn-ghost" onclick="closeModal('userModal')">Cancelar</button>
+    <button class="btn-action btn-blue" id="btnSaveUser" onclick="saveUser()">Guardar</button>
+  </div>
+</dialog>
+
+<!-- ══ MODAL CLIENTE ═══════════════════════ -->
+<dialog class="modal" id="clientModal">
+  <div class="modal-hdr"><h2 id="clientModalTitle">Nuevo cliente</h2>
+    <button class="modal-close" onclick="closeModal('clientModal')">&#10005;</button></div>
+  <div class="modal-body">
+    <div class="form-group"><label class="form-label">Nombre *</label><input class="form-control" type="text" id="cNombre"></div>
+    <div class="form-group"><label class="form-label">Descripción</label><textarea class="form-control" id="cDescripcion" rows="3" style="resize:vertical"></textarea></div>
+    <div class="feedback" id="clientFeedback"></div>
+  </div>
+  <div class="modal-ftr">
+    <button class="btn-action btn-ghost" onclick="closeModal('clientModal')">Cancelar</button>
+    <button class="btn-action btn-blue" id="btnSaveClient" onclick="saveClient()">Guardar</button>
+  </div>
+</dialog>
+
+<!-- ══ MODAL PROYECTO ══════════════════════ -->
+<dialog class="modal wide" id="projectModal">
+  <div class="modal-hdr"><h2 id="projectModalTitle">Nuevo proyecto</h2>
+    <button class="modal-close" onclick="closeModal('projectModal')">&#10005;</button></div>
+  <div class="modal-body">
+    <div class="form-group"><label class="form-label">Nombre *</label><input class="form-control" type="text" id="pNombre"></div>
+    <div class="form-group"><label class="form-label">Descripción</label><textarea class="form-control" id="pDescripcion" rows="2" style="resize:vertical"></textarea></div>
+    <div class="two-col">
+      <div class="form-group"><label class="form-label">Cliente *</label><select class="form-control" id="pCliente" onchange="onProjectClienteOrTipoChange()"></select></div>
+      <div class="form-group"><label class="form-label">Tipo de proyecto</label>
+        <select class="form-control" id="pTipo" onchange="onProjectClienteOrTipoChange()">
+          <option value="Gestión">Gestión</option><option value="Preventa">Preventa</option><option value="Ejecución">Ejecución</option>
+        </select></div>
+    </div>
+    <div class="two-col" id="pContratoGroup" style="display:none">
+      <div class="form-group"><label class="form-label">Contrato</label><select class="form-control" id="pContrato"><option value="">(Ninguno)</option></select></div>
+      <div></div>
+    </div>
+    <div class="two-col">
+      <div class="form-group"><label class="form-label">Estado</label>
+        <select class="form-control" id="pEstado">
+          <option value="1. Nuevo">1. Nuevo</option><option value="2. Planificando">2. Planificando</option>
+          <option value="3. En Ejecución">3. En Ejecución</option><option value="4. Cerrado">4. Cerrado</option>
+        </select></div>
+      <div></div>
+    </div>
+    <div class="two-col">
+      <div class="form-group"><label class="form-label">Fecha inicio</label><input class="form-control" type="date" id="pFechaIni"></div>
+      <div class="form-group"><label class="form-label">Fecha fin</label><input class="form-control" type="date" id="pFechaFin"></div>
+    </div>
+    <div class="feedback" id="projectFeedback"></div>
+
+    <div class="roles-section" id="contratosSection" style="display:none">
+      <div class="roles-title">Contratos de este proyecto</div>
+      <div id="contratosLocked" class="roles-locked">Guarda el proyecto para poder crear contratos.</div>
+      <div id="contratosList" style="display:none"></div>
+      <button class="btn-action btn-ghost btn-sm" id="btnNuevoContrato" style="display:none;margin-top:6px" onclick="openContractModal(null, editingProjectUrl)">&#43; Nuevo contrato</button>
+    </div>
+
+    <div class="roles-section" id="rolesSection">
+      <div class="roles-title">Asignación de roles</div>
+      <div id="rolesLocked" class="roles-locked">Guarda el proyecto para poder asignar roles.</div>
+      <div class="role-cols" id="rolesCols" style="display:none">
+        <div>
+          <div class="role-col-title">Director</div>
+          <div class="chip-list" id="chips-Director"></div>
+          <div class="role-add"><select id="add-Director"></select><button onclick="addRole('Director')">&#43;</button></div>
+        </div>
+        <div>
+          <div class="role-col-title">Project Manager</div>
+          <div class="chip-list" id="chips-Project Manager"></div>
+          <div class="role-add"><select id="add-Project Manager"></select><button onclick="addRole('Project Manager')">&#43;</button></div>
+        </div>
+        <div>
+          <div class="role-col-title">Project Team</div>
+          <div class="chip-list" id="chips-Project Team"></div>
+          <div class="role-add"><select id="add-Project Team"></select><button onclick="addRole('Project Team')">&#43;</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="modal-ftr">
+    <button class="btn-action btn-ghost" onclick="closeModal('projectModal')">Cerrar</button>
+    <button class="btn-action btn-blue" id="btnSaveProject" onclick="saveProject()">Guardar</button>
+  </div>
+</dialog>
+
+<!-- ══ MODAL CONTRATO ══════════════════════ -->
+<dialog class="modal" id="contractModal">
+  <div class="modal-hdr"><h2 id="contractModalTitle">Nuevo contrato</h2>
+    <button class="modal-close" onclick="closeModal('contractModal')">&#10005;</button></div>
+  <div class="modal-body">
+    <div class="form-group"><label class="form-label">Proyecto</label><div id="ctProyectoLabel" style="font-size:13px;font-weight:700;color:var(--text2);padding:6px 0">—</div></div>
+    <div class="form-group"><label class="form-label">Nombre *</label><input class="form-control" type="text" id="ctNombre"></div>
+    <div class="two-col">
+      <div class="form-group"><label class="form-label">Fecha inicio</label><input class="form-control" type="date" id="ctFechaIni"></div>
+      <div class="form-group"><label class="form-label">Fecha fin</label><input class="form-control" type="date" id="ctFechaFin"></div>
+    </div>
+    <div class="two-col">
+      <div class="form-group"><label class="form-label">Meses de prórroga</label><input class="form-control" type="number" min="0" step="1" id="ctMesesProrroga"></div>
+      <div class="form-group"><label class="form-label">Fecha fin prórroga</label><input class="form-control" type="date" id="ctFechaFinProrroga"></div>
+    </div>
+    <div class="feedback" id="contractFeedback"></div>
+  </div>
+  <div class="modal-ftr">
+    <button class="btn-action btn-ghost" onclick="closeModal('contractModal')">Cancelar</button>
+    <button class="btn-action btn-blue" id="btnSaveContract" onclick="saveContract()">Guardar</button>
+  </div>
+</dialog>
+
+<!-- ══ MODAL SPRINT ═════════════════════════ -->
+<dialog class="modal" id="sprintModal">
+  <div class="modal-hdr"><h2 id="sprintModalTitle">Nuevo sprint</h2>
+    <button class="modal-close" onclick="closeModal('sprintModal')">&#10005;</button></div>
+  <div class="modal-body">
+    <div class="two-col">
+      <div class="form-group"><label class="form-label">C&oacute;digo * <span style="font-weight:400;color:var(--text3)">(yyyy_sNN)</span></label><input class="form-control" type="text" id="spCodigo" placeholder="2026_s31"></div>
+      <div class="form-group"><label class="form-label">Estado</label>
+        <select class="form-control" id="spEstado">
+          <option value="Abierto">Abierto</option>
+          <option value="Cerrado">Cerrado</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group"><label class="form-label">Descripci&oacute;n</label><textarea class="form-control" id="spDescripcion" rows="3"></textarea></div>
+    <div class="two-col">
+      <div class="form-group"><label class="form-label">Fecha inicio</label><input class="form-control" type="date" id="spFechaIni"></div>
+      <div class="form-group"><label class="form-label">Fecha fin</label><input class="form-control" type="date" id="spFechaFin"></div>
+    </div>
+    <div class="feedback" id="sprintFeedback"></div>
+  </div>
+  <div class="modal-ftr">
+    <button class="btn-action btn-ghost" onclick="closeModal('sprintModal')">Cancelar</button>
+    <button class="btn-action btn-blue" id="btnSaveSprint" onclick="saveSprint()">Guardar</button>
+  </div>
+</dialog>
+
+</div><!-- /#appRoot -->
+
+<script>
+/* ══════════════════════════════════════════
+   CONFIG
+══════════════════════════════════════════ */
+/* Cliente real de supabase-js (sustituye a window.cowork.callMcpTool + execute_sql).
+   URL y clave publicable (anon) — pensadas para exponerse en el cliente: el acceso real
+   lo controla Row Level Security según la sesión de Supabase Auth, no esta clave. */
+var SUPABASE_URL = 'https://miemhxxytdovhpckpqsq.supabase.co';
+var SUPABASE_ANON_KEY = 'sb_publishable_IavIJA1_cDD_ABj-6htjtg_hKiy9TWP';
+var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+var ROLE_NAMES   = ['Director', 'Project Manager', 'Project Team'];
+
+var darkMode = false;
+var allUsuarios = [], allClientes = [], allProyectos = [], allRoles = [], allVacaciones = [], allContratos = [], allSprints = [];
+var configMaintUrl = null, maintenanceOn = false;
+var editingUserUrl = null, editingClientUrl = null, editingProjectUrl = null, editingContractUrl = null, editingSprintUrl = null;
+/* Ramas de cliente plegadas en el árbol (Set de urls de cliente). Vacío = todo expandido. */
+var collapsedClients = {};
+/* Fecha de referencia dentro del periodo mostrado en la pestaña Time-Line. */
+var timelineAnchor = new Date(); timelineAnchor.setHours(0,0,0,0);
+/* Nivel de zoom actual, de más detalle a menos: 'day' → 'week' → 'month' → 'quarter' → 'semester' → 'year'.
+   Cada nivel muestra VARIAS columnas de esa unidad (p.ej. "year" muestra varios años, uno por columna,
+   no un único año dividido en días) — no es un rango fijo de un solo periodo. */
+var timelineZoom = 'month';
+var ZOOM_LEVELS = ['day','week','month','quarter','semester','year'];
+var ZOOM_LABELS = { day:'Día', week:'Semana', month:'Mes', quarter:'Trimestre', semester:'Semestre', year:'Año' };
+/* Ventana (en años) que se muestra de una vez en los niveles que abarcan varios años,
+   y desplazamiento (en años, hacia atrás desde el año de referencia) al que empieza esa ventana. */
+var SEMESTER_ZOOM_WINDOW = 2, SEMESTER_ZOOM_OFFSET = -1;
+var YEAR_ZOOM_WINDOW = 6, YEAR_ZOOM_OFFSET = -2;
+var MESES_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+var MESES_ABR_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+var ESTADO_COLOR = { '1. Nuevo':'#64748b', '2. Planificando':'#d97706', '3. En Ejecución':'#ea580c', '4. Cerrado':'#16a34a' };
+/* Estado del Time-Line de la pestaña Vacaciones — independiente del de Mantenimiento de Proyectos,
+   con zoom por defecto en Mes (muestra el año en curso dividido en Ene-Dic). */
+var vacAnchor = new Date(); vacAnchor.setHours(0,0,0,0);
+var vacZoom = 'day';
+var TIPO_COLOR = { 'Vacaciones':'#2563eb', 'Asuntos propios':'#7c3aed' };
+var TIPO_COLOR_FALLBACK = '#64748b';
+
+/* ══════════════════════════════════════════
+   POLÍTICA DE ACTUALIZACIÓN DE DATOS (igual que REQ-8/REQ-10/REQ-17 producción)
+   Tras escribir en Supabase (crear/editar/borrar), NUNCA se vuelve a leer de inmediato:
+   se muta el objeto local correspondiente y se re-renderiza. loadAll() (relectura
+   completa) solo se usa en: la carga inicial, el botón "Actualizar" y el auto-refresco
+   de 5 minutos.
+══════════════════════════════════════════ */
+
+/* ══════════════════════════════════════════
+   HELPERS
+══════════════════════════════════════════ */
+function anyModalOpen(){
+  return ['userModal','clientModal','projectModal','contractModal','sprintModal'].some(function(id){ return document.getElementById(id).open; });
+}
+/* En Notion "url" era la URL de la página; aquí es directamente el uuid de Postgres,
+   así que ya no hace falta extraer nada de un patrón de URL. Se mantiene la función
+   (con el mismo nombre) porque el resto del archivo la invoca así por costumbre. */
+function pageIdFromUrl(url){ return url; }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+/* Genera un literal JS de un solo argumento string, para insertar dentro de atributos
+   onclick="..." (comillas dobles) sin que JSON.stringify (comillas dobles) rompa el HTML. */
+function jsArg(s){ return "'" + String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'") + "'"; }
+/* Postgres devuelve timestamps ISO completos ("2026-01-15T00:00:00+00:00"); el resto del
+   archivo espera 'YYYY-MM-DD' (igual que el date:...:start de Notion). */
+function toDateStr(v){ return v ? String(v).slice(0,10) : ''; }
+
+/* ── Capa de datos (supabase-js real, con la sesión del usuario autenticado) ──
+   Ya no hay MCP ni parsing de respuestas envueltas: sb.from(tabla)... devuelve
+   directamente {data, error}. El acceso real lo decide RLS con auth.uid()/auth.jwt(),
+   no esta capa — si una operación no está permitida, 'error' lo dirá y se propaga
+   igual que antes a través de las mismas funciones sqlUpdate/sqlInsert que ya usaban
+   todos los save*() de este archivo, así que esas funciones no cambian. */
+/* UPDATE genérico: cols es un objeto plano { columna: valorJS }. Solo se incluyen (y
+   por tanto solo se tocan) las columnas presentes en el objeto. */
+async function sqlUpdate(table, id, cols){
+  var { error } = await sb.from(table).update(cols).eq('id', id);
+  if (error) throw new Error(error.message);
+}
+/* INSERT genérico: devuelve el id (uuid) de la fila creada. */
+async function sqlInsert(table, cols){
+  var { data, error } = await sb.from(table).insert(cols).select('id').single();
+  if (error) throw new Error(error.message);
+  return data && data.id;
+}
+function showFeedback(id, ok, msg){
+  var el = document.getElementById(id);
+  el.className = 'feedback ' + (ok ? 'fb-ok' : 'fb-err');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+/* ══════════════════════════════════════════
+   THEME / TABS
+══════════════════════════════════════════ */
+function toggleTheme(){
+  darkMode = !darkMode;
+  document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+  document.getElementById('btnTheme').innerHTML = darkMode ? '&#9728; Claro' : '&#127769; Oscuro';
+}
+/* Campos de filtro/búsqueda cuyas opciones ya existen en el HTML estático (no se generan
+   a partir de los datos cargados), así que se pueden restaurar ANTES de loadAll(). El caso
+   de 'vacPersonaFilter' (opciones generadas desde allVacaciones) se trata aparte, dentro
+   de populateVacPersonaFilter(). */
+var FILTER_FIELD_IDS = ['userSearch', 'treeSearch', 'estadoFilter', 'timelineEstadoFilter', 'sprintSearch', 'sprintEstadoFilter'];
+function saveFiltersToStorage(){
+  var vals = {};
+  FILTER_FIELD_IDS.concat(['vacPersonaFilter']).forEach(function(id){
+    var el = document.getElementById(id);
+    if (el) vals[id] = el.value;
+  });
+  /* Nivel de zoom y fecha de referencia (anchor) de los dos Time-Line, para que
+     "Actualizar" también devuelva al mismo punto del calendario que se estaba viendo. */
+  vals.timelineZoom = timelineZoom;
+  vals.timelineAnchor = ymd(timelineAnchor);
+  vals.vacZoom = vacZoom;
+  vals.vacAnchor = ymd(vacAnchor);
+  try { localStorage.setItem('req17AdminFilters', JSON.stringify(vals)); } catch(e){ /* almacenamiento no disponible: se ignora */ }
+}
+function restoreFiltersFromStorage(){
+  var vals = {};
+  try { vals = JSON.parse(localStorage.getItem('req17AdminFilters') || '{}'); } catch(e){ /* almacenamiento no disponible: se ignora */ }
+  FILTER_FIELD_IDS.forEach(function(id){
+    var el = document.getElementById(id);
+    if (el && vals[id] !== undefined) el.value = vals[id];
+  });
+  if (vals.timelineZoom && ZOOM_LEVELS.indexOf(vals.timelineZoom) !== -1) timelineZoom = vals.timelineZoom;
+  if (vals.timelineAnchor){
+    var tA = new Date(vals.timelineAnchor + 'T00:00:00');
+    if (!isNaN(tA.getTime())) timelineAnchor = tA;
+  }
+  if (vals.vacZoom && ZOOM_LEVELS.indexOf(vals.vacZoom) !== -1) vacZoom = vals.vacZoom;
+  if (vals.vacAnchor){
+    var vA = new Date(vals.vacAnchor + 'T00:00:00');
+    if (!isNaN(vA.getTime())) vacAnchor = vA;
+  }
+}
+/* Botón "Actualizar" (y el auto-refresco, ver más abajo): guarda pestaña activa (ya lo
+   hace switchTab en cada cambio), filtros, y zoom/fecha de los Time-Line, antes de
+   recargar la página de verdad — así se recupera el código más reciente del artefacto
+   (a diferencia de un simple loadAll()) sin perder dónde estaba el usuario. */
+function refreshPanel(){
+  saveFiltersToStorage();
+  location.reload();
+}
+function switchTab(tab){
+  ['usuarios','proyectos','timeline','vacaciones','sprints'].forEach(function(t){
+    document.getElementById('panel-'+t).classList.toggle('visible', t===tab);
+    document.getElementById('panel-'+t).style.display = (t===tab ? 'block' : 'none');
+    document.getElementById('tabbtn-'+t).classList.toggle('active', t===tab);
+  });
+  if (tab === 'timeline') renderTimeline();
+  if (tab === 'vacaciones') renderVacTimeline();
+  if (tab === 'sprints') renderSprints();
+  try { localStorage.setItem('req17AdminActiveTab', tab); } catch(e){ /* almacenamiento no disponible: se ignora */ }
+}
+
+/* ══════════════════════════════════════════
+   MODO MANTENIMIENTO
+══════════════════════════════════════════ */
+async function loadConfig(){
+  var { data: rows, error } = await sb.from('configuracion').select('id,nombre,valor,descripcion').eq('nombre', 'Modo mantenimiento').limit(1);
+  if (error) throw new Error(error.message);
+  var row = rows[0];
+  if (row){
+    configMaintUrl = row.id;
+    maintenanceOn = row.valor === true || row.valor === 't' || row.valor === 'true';
+  }
+  var chk = document.getElementById('maintCheck');
+  chk.checked = maintenanceOn;
+  document.getElementById('maintLabel').classList.toggle('on', maintenanceOn);
+}
+async function toggleMaintenance(){
+  var chk = document.getElementById('maintCheck');
+  var newVal = chk.checked;
+  chk.disabled = true;
+  try {
+    if (!configMaintUrl) throw new Error('No se encontró la fila de configuración');
+    await sqlUpdate('configuracion', configMaintUrl, { valor: newVal });
+    maintenanceOn = newVal;
+    document.getElementById('maintLabel').classList.toggle('on', maintenanceOn);
+  } catch(e){
+    chk.checked = !newVal;
+    alert('No se pudo actualizar el modo mantenimiento: ' + e.message);
+  } finally {
+    chk.disabled = false;
+  }
+}
+
+/* ══════════════════════════════════════════
+   CARGA DE DATOS
+   Cada loader traduce las filas de Supabase a objetos JS con las MISMAS claves que el
+   resto del archivo espera de Notion (Nombre, Apellidos, Cliente como JSON-array de
+   un uuid, fechas 'YYYY-MM-DD', booleanos Notion-style '__YES__'/'__NO__', etc.) —
+   así renderUsuarios/renderTree/renderTimeline/renderRoles y todos los modales no
+   cambian ni una línea.
+══════════════════════════════════════════ */
+async function loadUsuariosRows(){
+  var { data: rows, error } = await sb.from('usuarios').select('id,nombre,apellidos,email,administrador,bloqueado');
+  if (error) throw new Error(error.message);
+  return rows.map(function(r){
+    return {
+      url: r.id, Nombre: r.nombre, Apellidos: r.apellidos, Email: r.email,
+      Administrador: r.administrador ? '__YES__' : '__NO__',
+      Bloqueado: r.bloqueado ? '__YES__' : '__NO__'
+    };
+  });
+}
+async function loadClientesRows(){
+  var { data: rows, error } = await sb.from('clientes').select('id,codigo,nombre,descripcion');
+  if (error) throw new Error(error.message);
+  return rows.map(function(r){
+    return { url: r.id, Código: r.codigo, Nombre: r.nombre, Descripción: r.descripcion };
+  });
+}
+async function loadProyectosRows(){
+  var { data: rows, error } = await sb.from('proyectos').select('id,codigo,nombre,descripcion,cliente_id,tipo,estado,fecha_inicio,fecha_fin,contrato_id');
+  if (error) throw new Error(error.message);
+  return rows.map(function(r){
+    return {
+      url: r.id, Código: r.codigo, Nombre: r.nombre, Descripción: r.descripcion,
+      Cliente: JSON.stringify(r.cliente_id ? [r.cliente_id] : []),
+      Tipo: r.tipo, Estado: r.estado,
+      'date:Fecha inicio:start': toDateStr(r.fecha_inicio),
+      'date:Fecha fin:start': toDateStr(r.fecha_fin),
+      Contrato: JSON.stringify(r.contrato_id ? [r.contrato_id] : [])
+    };
+  });
+}
+async function loadRolesRows(){
+  var { data: rows, error } = await sb.from('asignacion_roles').select('id,nombre,usuario_id,proyecto_id,rol,activo');
+  if (error) throw new Error(error.message);
+  return rows.map(function(r){
+    return {
+      url: r.id, Nombre: r.nombre,
+      Usuario: JSON.stringify(r.usuario_id ? [r.usuario_id] : []),
+      Proyecto: JSON.stringify(r.proyecto_id ? [r.proyecto_id] : []),
+      Rol: r.rol, Activo: r.activo ? '__YES__' : '__NO__'
+    };
+  });
+}
+async function loadVacacionesRows(){
+  /* Embed de PostgREST vía la FK vacaciones.persona_id -> usuarios.id, en vez del JOIN SQL
+     de antes. OJO (limitación de RLS a tener en cuenta en REQ-10, ver memoria del
+     proyecto): usuarios_select solo deja ver la propia fila a quien no sea admin, así que
+     si algún día un usuario NO administrador entra aquí, el nombre de las vacaciones de
+     OTRAS personas le llegará vacío (persona:null) aunque la fila de vacaciones sí se vea.
+     Para REQ-17 (panel de administración, uso exclusivo de administradores) no aplica. */
+  var { data: rows, error } = await sb.from('vacaciones').select('id,fecha_inicio,fecha_fin,tipo,periodo,persona:usuarios(nombre,apellidos)');
+  if (error) throw new Error(error.message);
+  return rows.map(function(r){
+    var u = r.persona || {};
+    var persona_nombre = ((u.nombre||'') + ' ' + (u.apellidos||'')).trim();
+    return {
+      url: r.id, Persona: persona_nombre,
+      'date:Fecha inicio:start': toDateStr(r.fecha_inicio),
+      'date:Fecha fin:start': toDateStr(r.fecha_fin),
+      Tipo: r.tipo, Periodo: r.periodo
+    };
+  });
+}
+async function loadContratosRows(){
+  var { data: rows, error } = await sb.from('contratos').select('id,codigo,nombre,proyecto_id,fecha_inicio,fecha_fin,meses_prorroga,fecha_fin_prorroga');
+  if (error) throw new Error(error.message);
+  return rows.map(function(r){
+    return {
+      url: r.id, Código: r.codigo, Nombre: r.nombre,
+      Proyecto: JSON.stringify(r.proyecto_id ? [r.proyecto_id] : []),
+      'date:Fecha inicio:start': toDateStr(r.fecha_inicio),
+      'date:Fecha fin:start': toDateStr(r.fecha_fin),
+      'Meses de prórroga': r.meses_prorroga,
+      'date:Fecha fin prórroga:start': toDateStr(r.fecha_fin_prorroga)
+    };
+  });
+}
+async function loadSprintsRows(){
+  var { data: rows, error } = await sb.from('sprints').select('id,codigo,descripcion,estado,fecha_inicio,fecha_fin');
+  if (error) throw new Error(error.message);
+  return rows.map(function(r){
+    return {
+      url: r.id, Código: r.codigo, Descripción: r.descripcion, Estado: r.estado,
+      'date:Fecha inicio:start': toDateStr(r.fecha_inicio),
+      'date:Fecha fin:start': toDateStr(r.fecha_fin)
+    };
+  });
+}
+async function loadAll(){
+  var btn = document.getElementById('btnRefresh');
+  if (btn) btn.disabled = true;
+  document.getElementById('loadingDiv').style.display = 'block';
+  try {
+    var results = await Promise.all([
+      loadUsuariosRows(),
+      loadClientesRows(),
+      loadProyectosRows(),
+      loadRolesRows(),
+      loadConfig(),
+      loadVacacionesRows(),
+      loadContratosRows(),
+      loadSprintsRows()
+    ]);
+    allUsuarios   = results[0].sort(function(a,b){ return (a.Nombre||'').localeCompare(b.Nombre||''); });
+    allClientes   = results[1].sort(function(a,b){ return (a.Nombre||'').localeCompare(b.Nombre||''); });
+    allProyectos  = results[2].sort(function(a,b){ return (a.Nombre||'').localeCompare(b.Nombre||''); });
+    allRoles      = results[3].filter(function(r){ return r.Activo === '__YES__'; });
+    allVacaciones = results[5];
+    allContratos  = results[6].sort(function(a,b){ return (a.Nombre||'').localeCompare(b.Nombre||''); });
+    allSprints    = results[7].sort(function(a,b){ return (b.Código||'').localeCompare(a.Código||''); });
+
+    /* El árbol de clientes/proyectos empieza siempre plegado. Solo se inicializa una vez
+       (primera carga): a partir de ahí se respeta lo que el usuario haya plegado/expandido
+       manualmente, incluso tras un "Actualizar". Los clientes nuevos que aparezcan en
+       cargas posteriores también arrancan plegados. */
+    allClientes.forEach(function(c){
+      if (!(c.url in collapsedClients)) collapsedClients[c.url] = true;
+    });
+
+    document.getElementById('lastUpd').innerHTML =
+      '&#8635; ' + new Date().toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
+    renderUsuarios();
+    renderTree();
+    renderTimeline();
+    populateVacPersonaFilter();
+    renderVacTimeline();
+    renderSprints();
+    document.getElementById('loadingDiv').style.display = 'none';
+    ['usuarios','proyectos','timeline','vacaciones','sprints'].forEach(function(t){
+      document.getElementById('panel-'+t).style.display =
+        document.getElementById('tabbtn-'+t).classList.contains('active') ? 'block' : 'none';
+    });
+  } catch(e){
+    /* No se toca allUsuarios/allClientes/allProyectos/allRoles ni se vuelve a renderizar:
+       se conservan los últimos datos cargados correctamente. Solo se avisa del fallo. */
+    document.getElementById('loadingDiv').style.display = 'none';
+    document.getElementById('lastUpd').innerHTML =
+      '<span style="color:#fca5a5">&#9888; No se pudo actualizar (se mantienen los últimos datos): ' + esc(e.message) + '</span>';
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+/* ══════════════════════════════════════════
+   USUARIOS — LISTA
+══════════════════════════════════════════ */
+function renderUsuarios(){
+  var search = (document.getElementById('userSearch').value || '').toLowerCase();
+  var list = allUsuarios.filter(function(u){
+    var full = ((u.Nombre||'') + ' ' + (u.Apellidos||'') + ' ' + (u.Email||'')).toLowerCase();
+    return full.indexOf(search) !== -1;
+  });
+  var el = document.getElementById('usersList');
+  if (!list.length){ el.innerHTML = '<div class="empty-msg">No hay usuarios' + (search?' que coincidan con la búsqueda':' todavía. Crea el primero con "+ Nuevo usuario"') + '.</div>'; return; }
+  el.innerHTML = list.map(function(u){
+    var initials = ((u.Nombre||'?')[0] + (u.Apellidos?u.Apellidos[0]:'')).toUpperCase();
+    var badges = '';
+    if (u.Administrador === '__YES__') badges += '<span class="badge badge-admin">Administrador</span>';
+    if (u.Bloqueado === '__YES__') badges += '<span class="badge badge-blocked">Bloqueado</span>';
+    return '<div class="user-row" onclick="openUserModal('+jsArg(u.url)+')">' +
+      '<div class="user-av">'+esc(initials)+'</div>' +
+      '<div class="user-info"><div class="user-name">'+esc(u.Nombre)+' '+esc(u.Apellidos||'')+badges+'</div>' +
+      '<div class="user-email">'+esc(u.Email||'')+'</div></div>' +
+      '</div>';
+  }).join('');
+}
+
+function openUserModal(url){
+  editingUserUrl = url;
+  var u = url ? allUsuarios.find(function(x){ return x.url === url; }) : null;
+  document.getElementById('userModalTitle').textContent = u ? 'Editar usuario' : 'Nuevo usuario';
+  document.getElementById('uNombre').value = u ? (u.Nombre||'') : '';
+  document.getElementById('uApellidos').value = u ? (u.Apellidos||'') : '';
+  document.getElementById('uEmail').value = u ? (u.Email||'') : '';
+  document.getElementById('uAdmin').checked = u ? (u.Administrador === '__YES__') : false;
+  document.getElementById('uBloqueado').checked = u ? (u.Bloqueado === '__YES__') : false;
+  document.getElementById('userFeedback').style.display = 'none';
+  var dlg = document.getElementById('userModal');
+  if (!dlg.open) dlg.showModal();
+}
+
+async function saveUser(){
+  var nombre = document.getElementById('uNombre').value.trim();
+  var apellidos = document.getElementById('uApellidos').value.trim();
+  var email = document.getElementById('uEmail').value.trim();
+  var admin = document.getElementById('uAdmin').checked;
+  var bloqueado = document.getElementById('uBloqueado').checked;
+
+  if (!nombre){ showFeedback('userFeedback', false, 'El nombre es obligatorio.'); return; }
+  if (!email || email.indexOf('@') === -1){ showFeedback('userFeedback', false, 'Introduce un email válido.'); return; }
+  var dup = allUsuarios.find(function(u){
+    return u.url !== editingUserUrl && (u.Email||'').toLowerCase() === email.toLowerCase();
+  });
+  if (dup){ showFeedback('userFeedback', false, 'Ya existe una cuenta con ese email (' + dup.Nombre + ').'); return; }
+
+  var btn = document.getElementById('btnSaveUser');
+  btn.disabled = true;
+  try {
+    var props = {
+      'Nombre': nombre, 'Apellidos': apellidos, 'Email': email,
+      'Administrador': admin ? '__YES__' : '__NO__',
+      'Bloqueado': bloqueado ? '__YES__' : '__NO__'
+    };
+    if (editingUserUrl){
+      await sqlUpdate('usuarios', editingUserUrl, {
+        nombre: props['Nombre'], apellidos: props['Apellidos'], email: props['Email'],
+        administrador: props['Administrador'] === '__YES__',
+        bloqueado: props['Bloqueado'] === '__YES__'
+      });
+      /* Como en REQ-8/REQ-10: se muta el objeto local ya cargado, sin volver a leer. */
+      var existing = allUsuarios.find(function(u){ return u.url === editingUserUrl; });
+      if (existing) Object.assign(existing, props);
+    } else {
+      var newUserId = await sqlInsert('usuarios', {
+        nombre: props['Nombre'], apellidos: props['Apellidos'], email: props['Email'],
+        administrador: props['Administrador'] === '__YES__',
+        bloqueado: props['Bloqueado'] === '__YES__'
+      });
+      allUsuarios.push(Object.assign({ url: newUserId }, props));
+    }
+    allUsuarios.sort(function(a,b){ return (a.Nombre||'').localeCompare(b.Nombre||''); });
+    renderUsuarios();
+    showFeedback('userFeedback', true, 'Usuario guardado correctamente.');
+    setTimeout(function(){ document.getElementById('userModal').close(); }, 500);
+  } catch(e){
+    showFeedback('userFeedback', false, 'Error al guardar: ' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ══════════════════════════════════════════
+   CLIENTES / PROYECTOS — ÁRBOL
+══════════════════════════════════════════ */
+function estadoClass(estado){
+  if (!estado) return 'est-1';
+  if (estado.indexOf('1.')===0) return 'est-1';
+  if (estado.indexOf('2.')===0) return 'est-2';
+  if (estado.indexOf('3.')===0) return 'est-3';
+  return 'est-4';
+}
+/* Devuelve el HTML "🔹 Etiqueta: Nombre1, Nombre2" para las personas asignadas a un rol
+   concreto de un proyecto, o cadena vacía si no hay nadie asignado a ese rol. */
+function personasEnRol(projectUrl, roleName, label){
+  var nombres = allRoles.filter(function(r){
+    if (r.Rol !== roleName) return false;
+    var rels = []; try { rels = JSON.parse(r.Proyecto||'[]'); } catch(e){}
+    return rels.indexOf(projectUrl) !== -1;
+  }).map(function(r){
+    var uUrl = (JSON.parse(r.Usuario||'[]')||[])[0];
+    var u = allUsuarios.find(function(x){ return x.url === uUrl; });
+    return u ? (u.Nombre + (u.Apellidos ? ' ' + u.Apellidos : '')) : null;
+  }).filter(Boolean);
+  if (!nombres.length) return '';
+  return '<span class="role-tag">'+label+': '+esc(nombres.join(', '))+'</span>';
+}
+/* Nº de personas con rol "Project Team" asignadas (activas) a un proyecto. */
+function countTeamMembers(projectUrl){
+  return allRoles.filter(function(r){
+    if (r.Rol !== 'Project Team') return false;
+    var rels = []; try { rels = JSON.parse(r.Proyecto||'[]'); } catch(e){}
+    return rels.indexOf(projectUrl) !== -1;
+  }).length;
+}
+/* Pliega/expande la rama de proyectos de un cliente en el árbol. */
+function toggleClientCollapse(clientUrl){
+  collapsedClients[clientUrl] = !collapsedClients[clientUrl];
+  renderTree();
+}
+/* Igual que collapsedClients pero para el nivel de Contratos dentro de un proyecto Ejecución,
+   y para el nivel de proyectos Gestión/Preventa dentro de un Contrato. Ambos empiezan
+   expandidos (solo el nivel Cliente arranca plegado, ver CC-017). */
+var collapsedEjecucion = {};
+var collapsedContratos = {};
+function toggleEjecucionCollapse(projectUrl){
+  collapsedEjecucion[projectUrl] = !collapsedEjecucion[projectUrl];
+  renderTree();
+}
+function toggleContratoCollapse(contratoUrl){
+  collapsedContratos[contratoUrl] = !collapsedContratos[contratoUrl];
+  renderTree();
+}
+/* Marcador de posición invisible, del mismo tamaño que un chevron real, para que las filas
+   sin hijos (o con hijos que no aplica plegar) queden alineadas con las que sí tienen chevron. */
+var TREE_TOGGLE_PLACEHOLDER = '<span class="tree-toggle" style="visibility:hidden">&#9660;</span>';
+function relUrls(row, prop){ try { return JSON.parse(row[prop] || '[]'); } catch(e){ return []; } }
+/* Contratos cuyo Proyecto padre (de tipo Ejecución) es projectUrl. */
+function contratosDeProyecto(projectUrl){
+  return allContratos.filter(function(ct){ return relUrls(ct, 'Proyecto').indexOf(projectUrl) !== -1; });
+}
+/* Proyectos (Gestión/Preventa) que cuelgan de un contrato concreto. */
+function proyectosDeContrato(contratoUrl){
+  return allProyectos.filter(function(p){ return relUrls(p, 'Contrato').indexOf(contratoUrl) !== -1; });
+}
+/* Fila de un proyecto (nombre, tipo, estado, equipo, fechas, roles) — reutilizada en los
+   distintos niveles del árbol: proyectos de tipo Ejecución (nivel 2) y proyectos de tipo
+   Gestión/Preventa anidados bajo un contrato (nivel 4). */
+function renderProjectRow(p, toggleHtml){
+  var ini = p['date:Fecha inicio:start'] || '';
+  var fin = p['date:Fecha fin:start'] || '';
+  var fechas = (ini || fin) ? (ini||'—') + ' → ' + (fin||'—') : 'Sin fechas';
+  var rolesLine = personasEnRol(p.url, 'Director', '&#128100; Director') + personasEnRol(p.url, 'Project Manager', '&#128203; PM');
+  var teamCount = countTeamMembers(p.url);
+  return '<div class="tree-row" onclick="openProjectModal('+jsArg(p.url)+', null)">' +
+      (toggleHtml || '') +
+      '<span class="tree-icon">&#128193;</span>' +
+      '<span class="tree-name">'+esc(p.Nombre)+' <span class="tree-code">'+esc(p.Código!=null?('PRY-'+p.Código):'')+'</span></span>' +
+      '<span class="tree-team" style="font-size:10px;color:var(--text3);font-weight:700" title="Tipo de proyecto">'+esc(p.Tipo||'')+'</span>' +
+      '<span class="estado-badge '+estadoClass(p.Estado)+'">'+esc(p.Estado||'1. Nuevo')+'</span>' +
+      '<span class="tree-team" title="Miembros de equipo (Project Team)">&#128101; '+teamCount+'</span>' +
+      '<span class="tree-meta">'+esc(fechas)+'</span>' +
+    '</div>' +
+    (rolesLine ? '<div class="tree-roles-line">'+rolesLine+'</div>' : '');
+}
+/* Rama de un contrato (nivel 3): cabecera con fechas/prórroga + proyectos Gestión/Preventa
+   anidados (nivel 4). Devuelve '' si el contrato queda oculto por el filtro/búsqueda activos. */
+function renderContractBranch(ct, search, estadoFiltro){
+  var nested = proyectosDeContrato(ct.url);
+  if (estadoFiltro) nested = nested.filter(function(p){ return p.Estado === estadoFiltro; });
+  var ctMatches = !search || (ct.Nombre||'').toLowerCase().indexOf(search) !== -1;
+  var visibleNested = nested.filter(function(p){ return !search || ctMatches || (p.Nombre||'').toLowerCase().indexOf(search) !== -1; });
+
+  if (estadoFiltro && !visibleNested.length) return ''; /* el contrato no tiene Estado propio: depende de sus proyectos */
+  if (search && !ctMatches && !visibleNested.length) return '';
+
+  var ini = ct['date:Fecha inicio:start'] || '', fin = ct['date:Fecha fin:start'] || '';
+  var prorroga = ct['date:Fecha fin prórroga:start'] || '';
+  var meses = ct['Meses de prórroga'];
+  var metaParts = [(ini||'—') + ' → ' + (fin||'—')];
+  if (meses) metaParts.push(meses + ' m. prórroga');
+  if (prorroga) metaParts.push('fin prórroga ' + prorroga);
+
+  var nestedHtml = nested.length
+    ? (visibleNested.length ? visibleNested.map(function(p){ return '<div class="tree-project-block">' + renderProjectRow(p) + '</div>'; }).join('')
+                             : '<div class="tree-empty">Ningún proyecto coincide con el filtro/búsqueda</div>')
+    : '<div class="tree-empty">Sin proyectos de Gestión/Preventa</div>';
+
+  var ctCollapsed = !!collapsedContratos[ct.url];
+  var ctToggle = nested.length
+    ? '<span class="tree-toggle'+(ctCollapsed?' collapsed':'')+'" onclick="event.stopPropagation();toggleContratoCollapse('+jsArg(ct.url)+')" title="Plegar/expandir proyectos">&#9660;</span>'
+    : TREE_TOGGLE_PLACEHOLDER;
+
+  return '<div class="tree-contrato-block">' +
+    '<div class="tree-row" onclick="openContractModal('+jsArg(ct.url)+', null)">' +
+      ctToggle +
+      '<span class="tree-icon">&#128196;</span>' +
+      '<span class="tree-name">'+esc(ct.Nombre)+' <span class="tree-code">'+esc(ct.Código!=null?('CON-'+ct.Código):'')+'</span></span>' +
+      '<span class="tree-meta">'+esc(metaParts.join(' · '))+'</span>' +
+    '</div>' +
+    '<div class="tree-projects'+(ctCollapsed?' collapsed':'')+'">' + nestedHtml + '</div>' +
+    '</div>';
+}
+/* Rama de un proyecto de tipo Ejecución (nivel 2): fila del proyecto + sus contratos
+   (nivel 3) anidados. Devuelve '' si queda oculta por el filtro/búsqueda activos. */
+function renderEjecucionBranch(p, search, estadoFiltro){
+  var contratos = contratosDeProyecto(p.url);
+  var contratosHtml = contratos.map(function(ct){ return renderContractBranch(ct, search, estadoFiltro); }).filter(Boolean).join('');
+  var hasVisibleContratos = contratosHtml.length > 0;
+
+  var selfEstadoOk = !estadoFiltro || p.Estado === estadoFiltro;
+  var selfSearchOk = !search || (p.Nombre||'').toLowerCase().indexOf(search) !== -1;
+  if (estadoFiltro && !selfEstadoOk && !hasVisibleContratos) return '';
+  if (search && !selfSearchOk && !hasVisibleContratos) return '';
+
+  var contratosBlock = contratos.length
+    ? (hasVisibleContratos ? contratosHtml : '<div class="tree-empty">Ningún contrato coincide con el filtro/búsqueda</div>')
+    : '<div class="tree-empty">Sin contratos</div>';
+
+  var pCollapsed = !!collapsedEjecucion[p.url];
+  var pToggle = contratos.length
+    ? '<span class="tree-toggle'+(pCollapsed?' collapsed':'')+'" onclick="event.stopPropagation();toggleEjecucionCollapse('+jsArg(p.url)+')" title="Plegar/expandir contratos">&#9660;</span>'
+    : TREE_TOGGLE_PLACEHOLDER;
+
+  return '<div class="tree-project-block">' +
+    renderProjectRow(p, pToggle) +
+    '<div class="tree-projects'+(pCollapsed?' collapsed':'')+'">' + contratosBlock + '</div>' +
+    '</div>';
+}
+function renderTree(){
+  var search = (document.getElementById('treeSearch').value || '').toLowerCase();
+  var estadoFiltro = document.getElementById('estadoFilter').value;
+  var el = document.getElementById('treeView');
+  if (!allClientes.length){ el.innerHTML = '<div class="empty-msg">No hay clientes todavía. Crea el primero con "+ Nuevo cliente".</div>'; return; }
+
+  var html = allClientes.map(function(c){
+    var projects = allProyectos.filter(function(p){ return relUrls(p, 'Cliente').indexOf(c.url) !== -1; });
+    /* Nivel 2: proyectos "Ejecución" (con sus contratos anidados). Nivel "suelto": proyectos
+       Gestión/Preventa SIN contrato asignado, mostrados igual que antes directamente bajo el cliente
+       (compatibilidad con datos existentes creados antes de que existiera Contrato). */
+    var ejecucionProjects = projects.filter(function(p){ return p.Tipo === 'Ejecución'; });
+    var standaloneProjects = projects.filter(function(p){ return p.Tipo !== 'Ejecución' && !relUrls(p, 'Contrato').length; });
+
+    var clientMatches = !search || (c.Nombre||'').toLowerCase().indexOf(search) !== -1;
+
+    var ejecHtml = ejecucionProjects.map(function(p){ return renderEjecucionBranch(p, search, estadoFiltro); }).filter(Boolean).join('');
+
+    var standaloneVisible = standaloneProjects.filter(function(p){ return !estadoFiltro || p.Estado === estadoFiltro; });
+    var standaloneShown = standaloneVisible.filter(function(p){
+      return !search || clientMatches || (p.Nombre||'').toLowerCase().indexOf(search) !== -1;
+    });
+    var standaloneHtml = standaloneShown.map(function(p){ return '<div class="tree-project-block">' + renderProjectRow(p, TREE_TOGGLE_PLACEHOLDER) + '</div>'; }).join('');
+
+    var hasAnyVisible = !!ejecHtml || !!standaloneHtml;
+    if (search && !clientMatches && !hasAnyVisible) return '';
+    if (estadoFiltro && !hasAnyVisible) return ''; /* cliente sin nada visible en ese estado: ocultar */
+
+    var projHtml = (ejecHtml + standaloneHtml) || '<div class="tree-empty">Sin proyectos</div>';
+
+    var isCollapsed = !!collapsedClients[c.url];
+    return '<div class="tree-client">' +
+      '<div class="tree-row client-row" onclick="openClientModal('+jsArg(c.url)+')">' +
+        '<span class="tree-toggle'+(isCollapsed?' collapsed':'')+'" onclick="event.stopPropagation();toggleClientCollapse('+jsArg(c.url)+')" title="Plegar/expandir">&#9660;</span>' +
+        '<span class="tree-icon">&#127970;</span>' +
+        '<span class="tree-name">'+esc(c.Nombre)+' <span class="tree-code">'+esc(c.Código!=null?('CLI-'+c.Código):'')+'</span></span>' +
+      '</div>' +
+      '<div class="tree-projects'+(isCollapsed?' collapsed':'')+'">' + projHtml + '</div>' +
+      '</div>';
+  }).join('');
+
+  el.innerHTML = html || '<div class="empty-msg">Sin resultados para el filtro/búsqueda aplicados.</div>';
+}
+
+/* ── CLIENTE modal ── */
+function openClientModal(url){
+  editingClientUrl = url;
+  var c = url ? allClientes.find(function(x){ return x.url === url; }) : null;
+  document.getElementById('clientModalTitle').textContent = c ? 'Editar cliente' : 'Nuevo cliente';
+  document.getElementById('cNombre').value = c ? (c.Nombre||'') : '';
+  document.getElementById('cDescripcion').value = c ? (c.Descripción||'') : '';
+  document.getElementById('clientFeedback').style.display = 'none';
+  var dlg = document.getElementById('clientModal');
+  if (!dlg.open) dlg.showModal();
+}
+async function saveClient(){
+  var nombre = document.getElementById('cNombre').value.trim();
+  var desc = document.getElementById('cDescripcion').value.trim();
+  if (!nombre){ showFeedback('clientFeedback', false, 'El nombre es obligatorio.'); return; }
+  var btn = document.getElementById('btnSaveClient');
+  btn.disabled = true;
+  try {
+    var props = { 'Nombre': nombre, 'Descripción': desc };
+    if (editingClientUrl){
+      await sqlUpdate('clientes', editingClientUrl, { nombre: props['Nombre'], descripcion: props['Descripción'] });
+      var existingC = allClientes.find(function(c){ return c.url === editingClientUrl; });
+      if (existingC) Object.assign(existingC, props);
+    } else {
+      var newClientId = await sqlInsert('clientes', { nombre: props['Nombre'], descripcion: props['Descripción'] });
+      allClientes.push(Object.assign({ url: newClientId }, props));
+    }
+    allClientes.sort(function(a,b){ return (a.Nombre||'').localeCompare(b.Nombre||''); });
+    renderTree();
+    showFeedback('clientFeedback', true, 'Cliente guardado correctamente.');
+    setTimeout(function(){ document.getElementById('clientModal').close(); }, 500);
+  } catch(e){
+    showFeedback('clientFeedback', false, 'Error al guardar: ' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ── PROYECTO modal ── */
+function fillClienteSelect(selectedUrl){
+  var sel = document.getElementById('pCliente');
+  sel.innerHTML = allClientes.map(function(c){
+    return '<option value="'+esc(c.url)+'" '+(c.url===selectedUrl?'selected':'')+'>'+esc(c.Nombre)+'</option>';
+  }).join('');
+}
+/* Contratos "disponibles" para un cliente: los que cuelgan de un proyecto Ejecución de ese cliente. */
+function contratosDisponiblesParaCliente(clienteUrl){
+  var ejecUrls = allProyectos.filter(function(p){
+    return p.Tipo === 'Ejecución' && relUrls(p, 'Cliente').indexOf(clienteUrl) !== -1;
+  }).map(function(p){ return p.url; });
+  return allContratos.filter(function(ct){
+    return relUrls(ct, 'Proyecto').some(function(u){ return ejecUrls.indexOf(u) !== -1; });
+  });
+}
+function fillContratoSelect(selectedUrl){
+  var clienteUrl = document.getElementById('pCliente').value;
+  var opciones = contratosDisponiblesParaCliente(clienteUrl);
+  var sel = document.getElementById('pContrato');
+  sel.innerHTML = '<option value="">(Ninguno)</option>' + opciones.map(function(ct){
+    return '<option value="'+esc(ct.url)+'" '+(ct.url===selectedUrl?'selected':'')+'>'+esc(ct.Nombre)+'</option>';
+  }).join('');
+}
+/* El campo Contrato solo aplica a proyectos Gestión/Preventa (los Ejecución son los que
+   "contienen" contratos, no los que cuelgan de uno). Se recalcula al cambiar Cliente o Tipo. */
+function onProjectClienteOrTipoChange(){
+  var tipo = document.getElementById('pTipo').value;
+  var group = document.getElementById('pContratoGroup');
+  if (tipo === 'Gestión' || tipo === 'Preventa'){
+    group.style.display = '';
+    fillContratoSelect(document.getElementById('pContrato').value);
+  } else {
+    group.style.display = 'none';
+    document.getElementById('pContrato').value = '';
+  }
+  updateContratosSectionVisibility();
+}
+/* Sección "Contratos de este proyecto": solo aplica a proyectos Ejecución ya guardados.
+   Se recalcula tanto al abrir el modal como al cambiar el Tipo en caliente (sin guardar). */
+function updateContratosSectionVisibility(){
+  var tipo = document.getElementById('pTipo').value;
+  var sec = document.getElementById('contratosSection');
+  if (tipo !== 'Ejecución'){ sec.style.display = 'none'; return; }
+  sec.style.display = 'block';
+  if (editingProjectUrl){
+    document.getElementById('contratosLocked').style.display = 'none';
+    document.getElementById('contratosList').style.display = 'block';
+    document.getElementById('btnNuevoContrato').style.display = 'inline-block';
+    renderContratosList(editingProjectUrl);
+  } else {
+    document.getElementById('contratosLocked').style.display = 'block';
+    document.getElementById('contratosLocked').textContent = 'Guarda el proyecto (tipo Ejecución) para poder crear contratos.';
+    document.getElementById('contratosList').style.display = 'none';
+    document.getElementById('btnNuevoContrato').style.display = 'none';
+  }
+}
+function openProjectModal(url, prefClienteUrl){
+  editingProjectUrl = url;
+  var p = url ? allProyectos.find(function(x){ return x.url === url; }) : null;
+  document.getElementById('projectModalTitle').textContent = p ? 'Editar proyecto' : 'Nuevo proyecto';
+  document.getElementById('pNombre').value = p ? (p.Nombre||'') : '';
+  document.getElementById('pDescripcion').value = p ? (p.Descripción||'') : '';
+  fillClienteSelect(p ? (relUrls(p,'Cliente')[0]||'') : (prefClienteUrl||''));
+  document.getElementById('pTipo').value = p ? (p.Tipo||'Gestión') : 'Gestión';
+  document.getElementById('pEstado').value = p ? (p.Estado||'1. Nuevo') : '1. Nuevo';
+  document.getElementById('pFechaIni').value = p ? (p['date:Fecha inicio:start']||'') : '';
+  document.getElementById('pFechaFin').value = p ? (p['date:Fecha fin:start']||'') : '';
+  document.getElementById('pContrato').value = '';
+  onProjectClienteOrTipoChange();
+  if (p) document.getElementById('pContrato').value = relUrls(p,'Contrato')[0] || '';
+  document.getElementById('projectFeedback').style.display = 'none';
+
+  if (p){
+    document.getElementById('rolesLocked').style.display = 'none';
+    document.getElementById('rolesCols').style.display = 'grid';
+    renderRoles(p.url);
+  } else {
+    document.getElementById('rolesLocked').style.display = 'block';
+    document.getElementById('rolesLocked').textContent = 'Guarda el proyecto para poder asignar roles.';
+    document.getElementById('rolesCols').style.display = 'none';
+  }
+
+  updateContratosSectionVisibility();
+
+  var dlg = document.getElementById('projectModal');
+  if (!dlg.open) dlg.showModal();
+}
+async function saveProject(){
+  var nombre = document.getElementById('pNombre').value.trim();
+  var clienteUrl = document.getElementById('pCliente').value;
+  if (!nombre){ showFeedback('projectFeedback', false, 'El nombre es obligatorio.'); return; }
+  if (!clienteUrl){ showFeedback('projectFeedback', false, 'Selecciona un cliente (crea uno primero si no hay ninguno).'); return; }
+
+  var tipoSel = document.getElementById('pTipo').value;
+  var contratoUrl = document.getElementById('pContrato').value;
+  var props = {
+    'Nombre': nombre,
+    'Descripción': document.getElementById('pDescripcion').value.trim(),
+    'Cliente': JSON.stringify([clienteUrl]),
+    'Tipo': tipoSel,
+    'Estado': document.getElementById('pEstado').value,
+    /* Contrato solo aplica a Gestión/Preventa; un proyecto Ejecución nunca cuelga de un contrato. */
+    'Contrato': (tipoSel === 'Gestión' || tipoSel === 'Preventa') && contratoUrl ? JSON.stringify([contratoUrl]) : JSON.stringify([])
+  };
+  var ini = document.getElementById('pFechaIni').value;
+  var fin = document.getElementById('pFechaFin').value;
+  if (ini){ props['date:Fecha inicio:start'] = ini; props['date:Fecha inicio:is_datetime'] = 0; }
+  if (fin){ props['date:Fecha fin:start'] = fin; props['date:Fecha fin:is_datetime'] = 0; }
+
+  var btn = document.getElementById('btnSaveProject');
+  btn.disabled = true;
+  try {
+    var pCols = {
+      nombre: props['Nombre'],
+      descripcion: props['Descripción'],
+      cliente_id: (JSON.parse(props['Cliente'])[0] || null),
+      tipo: props['Tipo'],
+      estado: props['Estado'],
+      contrato_id: (JSON.parse(props['Contrato'])[0] || null)
+    };
+    if ('date:Fecha inicio:start' in props) pCols.fecha_inicio = props['date:Fecha inicio:start'];
+    if ('date:Fecha fin:start' in props) pCols.fecha_fin = props['date:Fecha fin:start'];
+
+    if (editingProjectUrl){
+      await sqlUpdate('proyectos', editingProjectUrl, pCols);
+      var existingP = allProyectos.find(function(x){ return x.url === editingProjectUrl; });
+      if (existingP) Object.assign(existingP, props);
+      renderTree();
+      renderTimeline();
+      showFeedback('projectFeedback', true, 'Proyecto actualizado correctamente.');
+      renderRoles(editingProjectUrl);
+      updateContratosSectionVisibility();
+    } else {
+      var newUrl = await sqlInsert('proyectos', pCols);
+      if (!newUrl){ throw new Error('Supabase no devolvió el id del proyecto creado'); }
+      allProyectos.push(Object.assign({ url: newUrl }, props));
+      allProyectos.sort(function(a,b){ return (a.Nombre||'').localeCompare(b.Nombre||''); });
+      renderTree();
+      renderTimeline();
+      showFeedback('projectFeedback', true, 'Proyecto creado. Ya puedes asignar roles.');
+
+      editingProjectUrl = newUrl;
+      document.getElementById('projectModalTitle').textContent = 'Editar proyecto';
+      document.getElementById('rolesLocked').style.display = 'none';
+      document.getElementById('rolesCols').style.display = 'grid';
+      renderRoles(newUrl);
+      updateContratosSectionVisibility();
+    }
+  } catch(e){
+    showFeedback('projectFeedback', false, 'Error al guardar: ' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ══════════════════════════════════════════
+   ROLES (dentro del modal de proyecto)
+══════════════════════════════════════════ */
+function renderRoles(projectUrl){
+  var rolesForProject = allRoles.filter(function(r){
+    var rels = []; try { rels = JSON.parse(r.Proyecto||'[]'); } catch(e){}
+    return rels.indexOf(projectUrl) !== -1;
+  });
+  ROLE_NAMES.forEach(function(roleName){
+    var assigned = rolesForProject.filter(function(r){ return r.Rol === roleName; });
+    var chipsEl = document.getElementById('chips-' + roleName);
+    chipsEl.innerHTML = assigned.map(function(r){
+      var uUrl = (JSON.parse(r.Usuario||'[]')||[])[0];
+      var u = allUsuarios.find(function(x){ return x.url === uUrl; });
+      var name = u ? (u.Nombre + (u.Apellidos ? ' ' + u.Apellidos : '')) : 'Usuario';
+      return '<span class="chip">'+esc(name)+'<button onclick="removeRole('+jsArg(r.url)+', '+jsArg(projectUrl)+')" title="Quitar">&#10005;</button></span>';
+    }).join('') || '<span style="font-size:11px;color:var(--text3);font-style:italic">Sin asignar</span>';
+
+    var assignedUrls = assigned.map(function(r){ return (JSON.parse(r.Usuario||'[]')||[])[0]; });
+    var available = allUsuarios.filter(function(u){ return assignedUrls.indexOf(u.url) === -1; });
+    var sel = document.getElementById('add-' + roleName);
+    sel.innerHTML = available.length
+      ? available.map(function(u){ return '<option value="'+esc(u.url)+'">'+esc(u.Nombre)+' '+esc(u.Apellidos||'')+'</option>'; }).join('')
+      : '<option value="">Sin usuarios disponibles</option>';
+    sel.disabled = !available.length;
+  });
+}
+async function addRole(roleName){
+  if (!editingProjectUrl) return;
+  var sel = document.getElementById('add-' + roleName);
+  var userUrl = sel.value;
+  if (!userUrl) return;
+  var u = allUsuarios.find(function(x){ return x.url === userUrl; });
+  var p = allProyectos.find(function(x){ return x.url === editingProjectUrl; });
+  try {
+    var nombreRol = (u?u.Nombre:'Usuario') + ' · ' + (p?p.Nombre:'Proyecto') + ' · ' + roleName;
+    var newRoleUrl = await sqlInsert('asignacion_roles', {
+      nombre: nombreRol,
+      usuario_id: userUrl,
+      proyecto_id: editingProjectUrl,
+      rol: roleName,
+      activo: true
+    });
+    var roleProps = { Usuario: JSON.stringify([userUrl]), Proyecto: JSON.stringify([editingProjectUrl]), Rol: roleName, Activo: '__YES__' };
+    allRoles.push(Object.assign({ url: newRoleUrl }, roleProps));
+    renderRoles(editingProjectUrl);
+  } catch(e){
+    alert('No se pudo asignar el rol: ' + e.message);
+  }
+}
+async function removeRole(roleRowUrl, projectUrl){
+  try {
+    await sqlUpdate('asignacion_roles', roleRowUrl, { activo: false });
+    allRoles = allRoles.filter(function(r){ return r.url !== roleRowUrl; });
+    renderRoles(projectUrl);
+  } catch(e){
+    alert('No se pudo quitar la asignación: ' + e.message);
+  }
+}
+
+/* ══════════════════════════════════════════
+   CONTRATOS (dentro del modal de proyecto Ejecución)
+══════════════════════════════════════════ */
+/* Lista de contratos del proyecto Ejecución que se está editando, mostrada dentro de
+   su modal — cada fila abre el modal de Contrato correspondiente para editarlo. */
+function renderContratosList(projectUrl){
+  var el = document.getElementById('contratosList');
+  if (!el) return;
+  var contratos = contratosDeProyecto(projectUrl).sort(function(a,b){ return (a.Nombre||'').localeCompare(b.Nombre||''); });
+  if (!contratos.length){ el.innerHTML = '<div class="roles-locked">Sin contratos todavía. Crea el primero con "+ Nuevo contrato".</div>'; return; }
+  el.innerHTML = contratos.map(function(ct){
+    var ini = ct['date:Fecha inicio:start'] || '', fin = ct['date:Fecha fin:start'] || '';
+    var nProyectos = proyectosDeContrato(ct.url).length;
+    return '<div class="contrato-row" onclick="openContractModal('+jsArg(ct.url)+', null)">' +
+      '<span class="contrato-name">'+esc(ct.Nombre)+' <span class="tree-code">'+esc(ct.Código!=null?('CON-'+ct.Código):'')+'</span></span>' +
+      '<span class="contrato-meta">'+esc((ini||'—')+' → '+(fin||'—'))+'</span>' +
+      '<span class="contrato-meta">'+nProyectos+' proyecto'+(nProyectos===1?'':'s')+'</span>' +
+    '</div>';
+  }).join('');
+}
+function openContractModal(url, prefProjectUrl){
+  editingContractUrl = url;
+  var ct = url ? allContratos.find(function(x){ return x.url === url; }) : null;
+  var projectUrl = ct ? (relUrls(ct,'Proyecto')[0] || null) : (prefProjectUrl || editingProjectUrl);
+  var proyecto = projectUrl ? allProyectos.find(function(x){ return x.url === projectUrl; }) : null;
+
+  document.getElementById('contractModalTitle').textContent = ct ? 'Editar contrato' : 'Nuevo contrato';
+  document.getElementById('ctProyectoLabel').textContent = proyecto ? (proyecto.Nombre + (proyecto.Código!=null?' (PRY-'+proyecto.Código+')':'')) : '—';
+  document.getElementById('ctNombre').value = ct ? (ct.Nombre||'') : '';
+  document.getElementById('ctFechaIni').value = ct ? (ct['date:Fecha inicio:start']||'') : '';
+  document.getElementById('ctFechaFin').value = ct ? (ct['date:Fecha fin:start']||'') : '';
+  document.getElementById('ctMesesProrroga').value = ct && ct['Meses de prórroga'] != null ? ct['Meses de prórroga'] : '';
+  document.getElementById('ctFechaFinProrroga').value = ct ? (ct['date:Fecha fin prórroga:start']||'') : '';
+  document.getElementById('contractFeedback').style.display = 'none';
+
+  /* El proyecto padre se guarda en un atributo data-* del modal, no editable desde aquí:
+     un contrato se crea siempre desde el proyecto Ejecución al que pertenece. */
+  document.getElementById('contractModal').dataset.projectUrl = projectUrl || '';
+
+  var dlg = document.getElementById('contractModal');
+  if (!dlg.open) dlg.showModal();
+}
+async function saveContract(){
+  var nombre = document.getElementById('ctNombre').value.trim();
+  var projectUrl = document.getElementById('contractModal').dataset.projectUrl || '';
+  if (!nombre){ showFeedback('contractFeedback', false, 'El nombre es obligatorio.'); return; }
+  if (!projectUrl){ showFeedback('contractFeedback', false, 'No se ha podido determinar el proyecto Ejecución de este contrato.'); return; }
+
+  var props = { 'Nombre': nombre, 'Proyecto': JSON.stringify([projectUrl]) };
+  var ini = document.getElementById('ctFechaIni').value;
+  var fin = document.getElementById('ctFechaFin').value;
+  var finProrroga = document.getElementById('ctFechaFinProrroga').value;
+  var meses = document.getElementById('ctMesesProrroga').value;
+  if (ini){ props['date:Fecha inicio:start'] = ini; props['date:Fecha inicio:is_datetime'] = 0; }
+  if (fin){ props['date:Fecha fin:start'] = fin; props['date:Fecha fin:is_datetime'] = 0; }
+  if (finProrroga){ props['date:Fecha fin prórroga:start'] = finProrroga; props['date:Fecha fin prórroga:is_datetime'] = 0; }
+  props['Meses de prórroga'] = meses !== '' ? Number(meses) : null;
+
+  var btn = document.getElementById('btnSaveContract');
+  btn.disabled = true;
+  try {
+    var ctCols = {
+      nombre: props['Nombre'],
+      proyecto_id: (JSON.parse(props['Proyecto'])[0] || null),
+      meses_prorroga: props['Meses de prórroga']
+    };
+    if ('date:Fecha inicio:start' in props) ctCols.fecha_inicio = props['date:Fecha inicio:start'];
+    if ('date:Fecha fin:start' in props) ctCols.fecha_fin = props['date:Fecha fin:start'];
+    if ('date:Fecha fin prórroga:start' in props) ctCols.fecha_fin_prorroga = props['date:Fecha fin prórroga:start'];
+
+    if (editingContractUrl){
+      await sqlUpdate('contratos', editingContractUrl, ctCols);
+      var existingCt = allContratos.find(function(x){ return x.url === editingContractUrl; });
+      if (existingCt) Object.assign(existingCt, props);
+    } else {
+      var newUrl = await sqlInsert('contratos', ctCols);
+      if (!newUrl){ throw new Error('Supabase no devolvió el id del contrato creado'); }
+      allContratos.push(Object.assign({ url: newUrl }, props));
+      editingContractUrl = newUrl;
+    }
+    allContratos.sort(function(a,b){ return (a.Nombre||'').localeCompare(b.Nombre||''); });
+    renderTree();
+    renderTimeline();
+    if (document.getElementById('projectModal').open) renderContratosList(projectUrl);
+    showFeedback('contractFeedback', true, 'Contrato guardado correctamente.');
+    setTimeout(function(){ document.getElementById('contractModal').close(); }, 500);
+  } catch(e){
+    showFeedback('contractFeedback', false, 'Error al guardar: ' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ══════════════════════════════════════════
+   TIME-LINE (calendario tipo Gantt con zoom: semana/mes/trimestre/año)
+══════════════════════════════════════════ */
+/* Avanza/retrocede el "ancla" de fecha una página completa según el nivel de zoom dado.
+   Reutilizable por cualquier Time-Line del panel (Proyectos, Vacaciones...). */
+function zoomStepAnchor(anchor, zoom, delta){
+  if (zoom === 'day') anchor.setMonth(anchor.getMonth() + delta);
+  else if (zoom === 'semester') anchor.setFullYear(anchor.getFullYear() + delta * SEMESTER_ZOOM_WINDOW);
+  else if (zoom === 'year') anchor.setFullYear(anchor.getFullYear() + delta * YEAR_ZOOM_WINDOW);
+  else anchor.setFullYear(anchor.getFullYear() + delta); /* week / month / quarter: página de 1 año */
+}
+/* Devuelve el siguiente nivel de zoom en la dirección dada (-1 = más detalle, +1 = menos detalle),
+   o el mismo nivel si ya está en un extremo. */
+function zoomStepLevel(zoom, dir){
+  var idx = ZOOM_LEVELS.indexOf(zoom) + dir;
+  return (idx < 0 || idx >= ZOOM_LEVELS.length) ? zoom : ZOOM_LEVELS[idx];
+}
+function updateZoomControls(zoom, labelId, zinId, zoutId){
+  var idx = ZOOM_LEVELS.indexOf(zoom);
+  var lbl = document.getElementById(labelId);
+  if (lbl) lbl.textContent = ZOOM_LABELS[zoom];
+  var zin = document.getElementById(zinId);
+  var zout = document.getElementById(zoutId);
+  if (zin) zin.disabled = (idx === 0);
+  if (zout) zout.disabled = (idx === ZOOM_LEVELS.length - 1);
+}
+/* Calcula el rango de fechas visible y las columnas de cabecera para un zoom/ancla dados.
+   Cada columna trae { start:Date, days:Number, label:String } — el ancho de columna en
+   la rejilla CSS se reparte proporcionalmente a "days", así que columnas de distinta
+   duración (p.ej. un año bisiesto) se dibujan con el ancho correcto en vez de asumir
+   columnas iguales. Cada nivel muestra VARIAS columnas de su propia unidad (p.ej. "Año"
+   muestra varios años completos, uno por columna — no un único año dividido en meses).
+   Reutilizable por cualquier Time-Line del panel.
+   'rolling' (opcional): si es true, TODAS las vistas arrancan en el periodo que contiene
+   al anchor (mes/trimestre/semestre/año/semana actual) en vez de en enero del año del
+   anchor (o, para semestre/año, del año-ventana con offset). Lo usa el Time-Line de
+   Vacaciones; el de Proyectos solo lo aplica (siempre, sea cual sea 'rolling') en la
+   vista "Mes", que es la única vista para la que se pidió expresamente. */
+function computeZoomRange(zoom, anchor, rolling){
+  var start, end, columns = [];
+  if (zoom === 'day'){
+    var y = anchor.getFullYear(), m = anchor.getMonth();
+    start = new Date(y, m, 1);
+    var dim = new Date(y, m + 1, 0).getDate();
+    end = new Date(y, m, dim);
+    for (var d = 1; d <= dim; d++) columns.push({ start: new Date(y, m, d), days: 1, label: String(d) });
+
+  } else if (zoom === 'week'){
+    if (rolling){
+      /* Ventana móvil de 52 semanas (lunes-domingo, ISO) empezando en la semana actual. */
+      var wkMonday = mondayOfWeek(anchor);
+      start = wkMonday;
+      for (var wi = 0; wi < 52; wi++){
+        var wS = new Date(wkMonday); wS.setDate(wS.getDate() + wi * 7);
+        var wInfo = isoWeekInfo(wS);
+        columns.push({ start: wS, days: 7, label: 'S' + wInfo.isoWeek + ' ' + wInfo.isoYear });
+      }
+      end = new Date(wkMonday); end.setDate(end.getDate() + 52 * 7 - 1);
+    } else {
+      var yW = anchor.getFullYear();
+      start = new Date(yW, 0, 1); end = new Date(yW, 11, 31);
+      var curW = new Date(start); var wIdx = 1;
+      while (curW <= end){
+        var wEnd = new Date(curW); wEnd.setDate(wEnd.getDate() + 6);
+        if (wEnd > end) wEnd = new Date(end);
+        var wDays = Math.round((wEnd - curW) / 86400000) + 1;
+        columns.push({ start: new Date(curW), days: wDays, label: 'S' + wIdx + ' ' + yW });
+        curW.setDate(curW.getDate() + 7);
+        wIdx++;
+      }
+    }
+
+  } else if (zoom === 'month'){
+    /* Ventana móvil de 12 meses empezando en el mes del anchor (no enero-diciembre fijo),
+       para que el Time-Line siempre arranque en el mes actual en vez de mostrar medio año
+       ya transcurrido. Se aplica siempre en esta vista (no depende de 'rolling'). */
+    var startM = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+    start = startM; end = new Date(startM.getFullYear(), startM.getMonth() + 12, 0);
+    for (var mm = 0; mm < 12; mm++){
+      var colDateM = new Date(startM.getFullYear(), startM.getMonth() + mm, 1);
+      var dimM = new Date(colDateM.getFullYear(), colDateM.getMonth() + 1, 0).getDate();
+      var lblM = MESES_ABR_ES[colDateM.getMonth()] + (colDateM.getMonth() === 0 ? ' ' + colDateM.getFullYear() : '');
+      columns.push({ start: colDateM, days: dimM, label: lblM });
+    }
+
+  } else if (zoom === 'quarter'){
+    if (rolling){
+      /* Ventana móvil de 4 trimestres empezando en el trimestre actual. */
+      var qStartBase = new Date(anchor.getFullYear(), Math.floor(anchor.getMonth() / 3) * 3, 1);
+      start = qStartBase; end = new Date(qStartBase.getFullYear(), qStartBase.getMonth() + 12, 0);
+      for (var qi = 0; qi < 4; qi++){
+        var qS = new Date(qStartBase.getFullYear(), qStartBase.getMonth() + qi * 3, 1);
+        var qE = new Date(qStartBase.getFullYear(), qStartBase.getMonth() + qi * 3 + 3, 0);
+        var qNum = Math.floor(qS.getMonth() / 3) + 1;
+        columns.push({ start: qS, days: Math.round((qE - qS) / 86400000) + 1, label: 'T' + qNum + ' ' + qS.getFullYear() });
+      }
+    } else {
+      var yQ = anchor.getFullYear();
+      start = new Date(yQ, 0, 1); end = new Date(yQ, 11, 31);
+      for (var q = 0; q < 4; q++){
+        var qStart = new Date(yQ, q * 3, 1);
+        var qEnd = new Date(yQ, q * 3 + 3, 0);
+        columns.push({ start: qStart, days: Math.round((qEnd - qStart) / 86400000) + 1, label: 'T' + (q + 1) + ' ' + yQ });
+      }
+    }
+
+  } else if (zoom === 'semester'){
+    if (rolling){
+      /* Ventana móvil de SEMESTER_ZOOM_WINDOW semestres empezando en el semestre actual. */
+      var semStartBase = new Date(anchor.getFullYear(), anchor.getMonth() < 6 ? 0 : 6, 1);
+      start = semStartBase; end = new Date(semStartBase.getFullYear(), semStartBase.getMonth() + SEMESTER_ZOOM_WINDOW * 6, 0);
+      for (var si = 0; si < SEMESTER_ZOOM_WINDOW; si++){
+        var sS = new Date(semStartBase.getFullYear(), semStartBase.getMonth() + si * 6, 1);
+        var sE = new Date(semStartBase.getFullYear(), semStartBase.getMonth() + si * 6 + 6, 0);
+        var sNum = sS.getMonth() === 0 ? 1 : 2;
+        columns.push({ start: sS, days: Math.round((sE - sS) / 86400000) + 1, label: 'S' + sNum + ' ' + sS.getFullYear() });
+      }
+    } else {
+      var yBaseS = anchor.getFullYear() + SEMESTER_ZOOM_OFFSET;
+      start = new Date(yBaseS, 0, 1); end = new Date(yBaseS + SEMESTER_ZOOM_WINDOW - 1, 11, 31);
+      for (var ys = 0; ys < SEMESTER_ZOOM_WINDOW; ys++){
+        var yr = yBaseS + ys;
+        var s1s = new Date(yr, 0, 1), s1e = new Date(yr, 5, 30);
+        var s2s = new Date(yr, 6, 1), s2e = new Date(yr, 11, 31);
+        columns.push({ start: s1s, days: Math.round((s1e - s1s) / 86400000) + 1, label: 'S1 ' + yr });
+        columns.push({ start: s2s, days: Math.round((s2e - s2s) / 86400000) + 1, label: 'S2 ' + yr });
+      }
+    }
+
+  } else { /* year */
+    if (rolling){
+      /* Ventana móvil de YEAR_ZOOM_WINDOW años empezando en el año actual (sin offset hacia atrás). */
+      var yBaseR = anchor.getFullYear();
+      start = new Date(yBaseR, 0, 1); end = new Date(yBaseR + YEAR_ZOOM_WINDOW - 1, 11, 31);
+      for (var yr3 = 0; yr3 < YEAR_ZOOM_WINDOW; yr3++){
+        var yrY3 = yBaseR + yr3;
+        var ys3 = new Date(yrY3, 0, 1), ye3 = new Date(yrY3, 11, 31);
+        columns.push({ start: ys3, days: Math.round((ye3 - ys3) / 86400000) + 1, label: String(yrY3) });
+      }
+    } else {
+      var yBaseY = anchor.getFullYear() + YEAR_ZOOM_OFFSET;
+      start = new Date(yBaseY, 0, 1); end = new Date(yBaseY + YEAR_ZOOM_WINDOW - 1, 11, 31);
+      for (var yy = 0; yy < YEAR_ZOOM_WINDOW; yy++){
+        var yrY = yBaseY + yy;
+        var ys2 = new Date(yrY, 0, 1), ye2 = new Date(yrY, 11, 31);
+        columns.push({ start: ys2, days: Math.round((ye2 - ys2) / 86400000) + 1, label: String(yrY) });
+      }
+    }
+  }
+  return { start: start, end: end, columns: columns };
+}
+function zoomHeaderLabel(zoom, range){
+  if (zoom === 'day') return MESES_ES[range.start.getMonth()] + ' ' + range.start.getFullYear();
+  if (zoom === 'month'){
+    /* Ventana móvil de 12 meses: si empieza y acaba en el mismo año basta con mostrarlo una
+       vez, pero si cruza de año (p.ej. jul 2026 – jun 2027) hay que mostrar ambos extremos. */
+    if (range.start.getFullYear() === range.end.getFullYear()) return String(range.start.getFullYear());
+    return MESES_ABR_ES[range.start.getMonth()] + ' ' + range.start.getFullYear() + ' – ' +
+      MESES_ABR_ES[range.end.getMonth()] + ' ' + range.end.getFullYear();
+  }
+  /* semester / year / week / quarter (fijos o en ventana móvil): un único año si el rango
+     no cruza de año natural, o "año inicio – año fin" si lo cruza. */
+  if (range.start.getFullYear() === range.end.getFullYear()) return String(range.start.getFullYear());
+  return range.start.getFullYear() + ' – ' + range.end.getFullYear();
+}
+
+function timelineNav(delta){ zoomStepAnchor(timelineAnchor, timelineZoom, delta); renderTimeline(); }
+function timelineToday(){ timelineAnchor = new Date(); timelineAnchor.setHours(0,0,0,0); renderTimeline(); }
+function timelineZoomIn(){ timelineZoom = zoomStepLevel(timelineZoom, -1); renderTimeline(); }
+function timelineZoomOut(){ timelineZoom = zoomStepLevel(timelineZoom, 1); renderTimeline(); }
+
+function renderTimeline(){
+  var labelEl = document.getElementById('timelineMonthLabel');
+  var el = document.getElementById('timelineView');
+  if (!labelEl || !el) return; /* pestaña aún no presente en el DOM */
+
+  updateZoomControls(timelineZoom, 'timelineZoomLabel', 'btnTlZoomIn', 'btnTlZoomOut');
+  var range = computeZoomRange(timelineZoom, timelineAnchor);
+  var totalDays = Math.round((range.end - range.start) / 86400000) + 1;
+  var headerLabel = zoomHeaderLabel(timelineZoom, range);
+  labelEl.textContent = headerLabel;
+
+  var estadoFiltro = document.getElementById('timelineEstadoFilter').value;
+  var today = new Date(); today.setHours(0,0,0,0);
+
+  var rows = allProyectos.filter(function(p){
+    var ini = p['date:Fecha inicio:start'], fin = p['date:Fecha fin:start'];
+    if (!ini && !fin) return false;
+    if (estadoFiltro && p.Estado !== estadoFiltro) return false;
+    var pIni = ini ? new Date(ini + 'T00:00:00') : range.start;
+    var pFin = fin ? new Date(fin + 'T00:00:00') : range.end;
+    return pFin >= range.start && pIni <= range.end; /* el proyecto se solapa con el periodo visible */
+  }).sort(function(a,b){
+    var aIni = a['date:Fecha inicio:start'] || '9999';
+    var bIni = b['date:Fecha inicio:start'] || '9999';
+    return aIni.localeCompare(bIni);
+  });
+
+  if (!rows.length){
+    el.innerHTML = '<div class="empty-msg">No hay proyectos con fechas en ' + esc(headerLabel) +
+      (estadoFiltro ? ' con el estado seleccionado' : '') + '.</div>';
+    return;
+  }
+
+  function pct(date){
+    var dd = (date - range.start) / 86400000;
+    dd = Math.max(0, Math.min(totalDays, dd));
+    return dd / totalDays * 100;
+  }
+  var gridTemplateColumns = range.columns.map(function(c){ return c.days + 'fr'; }).join(' ');
+  var dayHeaders = range.columns.map(function(c){
+    var colEnd = new Date(c.start.getTime() + c.days * 86400000);
+    var isToday = today >= c.start && today < colEnd;
+    return '<div class="tl-day' + (isToday ? ' today' : '') + '">' + esc(c.label) + '</div>';
+  }).join('');
+  var gridCells = range.columns.map(function(){ return '<div></div>'; }).join('');
+
+  var clienteNombre = {};
+  allClientes.forEach(function(c){ clienteNombre[c.url] = c.Nombre; });
+
+  var bodyRows = rows.map(function(p){
+    var ini = p['date:Fecha inicio:start'], fin = p['date:Fecha fin:start'];
+    var pIni = ini ? new Date(ini + 'T00:00:00') : range.start;
+    var pFin = fin ? new Date(fin + 'T00:00:00') : range.end;
+    var clipIni = pIni < range.start ? range.start : pIni;
+    var clipFin = pFin > range.end ? range.end : pFin;
+    var leftPct = pct(clipIni);
+    var rightPct = pct(new Date(clipFin.getTime() + 86400000)); /* incluye el día completo de fin */
+    var widthPct = Math.max(rightPct - leftPct, 0.5);
+    var color = ESTADO_COLOR[p.Estado] || '#94a3b8';
+    var clienteRel = []; try { clienteRel = JSON.parse(p.Cliente || '[]'); } catch(e){}
+    var cName = clienteNombre[clienteRel[0]] || '';
+    var barLabel = esc(p.Nombre) + ' · ' + esc(p.Estado || '');
+    return '<div class="tl-rowlabel"><span class="tl-pname" title="' + esc(p.Nombre) + '">' + esc(p.Nombre) + '</span>' +
+        (cName ? '<span class="tl-cname">' + esc(cName) + '</span>' : '') + '</div>' +
+      '<div class="tl-track">' +
+        '<div class="tl-track-grid" style="grid-template-columns:' + gridTemplateColumns + '">' + gridCells + '</div>' +
+        '<div class="tl-bar" style="left:' + leftPct + '%;width:' + widthPct + '%;background:' + color + '" ' +
+          'onclick="openProjectModal(' + jsArg(p.url) + ', null)" title="' + esc(barLabel) + '">' + barLabel + '</div>' +
+      '</div>';
+  }).join('');
+
+  el.innerHTML = '<div class="tl-table">' +
+    '<div class="tl-corner"></div>' +
+    '<div class="tl-daysheader" style="grid-template-columns:' + gridTemplateColumns + '">' + dayHeaders + '</div>' +
+    bodyRows +
+    '</div>';
+}
+
+/* ══════════════════════════════════════════
+   TIME-LINE — VACACIONES (plan de vacaciones del equipo)
+   Reutiliza el mismo motor de zoom/rango que el Time-Line de Proyectos
+   (zoomStepAnchor / zoomStepLevel / computeZoomRange / zoomHeaderLabel /
+   updateZoomControls), con su propio estado (vacZoom/vacAnchor) y zoom
+   por defecto en "month" (Ene-Dic del año en curso).
+══════════════════════════════════════════ */
+function vacNav(delta){ zoomStepAnchor(vacAnchor, vacZoom, delta); renderVacTimeline(); }
+function vacToday(){ vacAnchor = new Date(); vacAnchor.setHours(0,0,0,0); renderVacTimeline(); }
+function vacZoomIn(){ vacZoom = zoomStepLevel(vacZoom, -1); renderVacTimeline(); }
+function vacZoomOut(){ vacZoom = zoomStepLevel(vacZoom, 1); renderVacTimeline(); }
+
+/* Rellena el filtro de persona con los nombres distintos presentes en allVacaciones,
+   conservando la selección previa si sigue existiendo. */
+function populateVacPersonaFilter(){
+  var sel = document.getElementById('vacPersonaFilter');
+  if (!sel) return;
+  var previo = sel.value;
+  /* Justo después de "Actualizar" (recarga real de página) el <select> aún no tiene más
+     opción que "Todas las personas", así que 'previo' llega vacío aunque el usuario tuviera
+     un filtro puesto. En ese caso concreto (primera vez que se rellenan las opciones tras
+     cargar datos) se recurre al filtro guardado en localStorage por saveFiltersToStorage(). */
+  if (!previo){
+    try {
+      var savedFilters = JSON.parse(localStorage.getItem('req17AdminFilters') || '{}');
+      previo = savedFilters.vacPersonaFilter || '';
+    } catch(e){ /* almacenamiento no disponible: se ignora */ }
+  }
+  var nombres = [];
+  allVacaciones.forEach(function(v){ if (v.Persona && nombres.indexOf(v.Persona) === -1) nombres.push(v.Persona); });
+  nombres.sort(function(a,b){ return a.localeCompare(b); });
+  sel.innerHTML = '<option value="">Todas las personas</option>' +
+    nombres.map(function(n){ return '<option value="' + esc(n) + '">' + esc(n) + '</option>'; }).join('');
+  if (nombres.indexOf(previo) !== -1) sel.value = previo;
+}
+function renderVacTimeline(){
+  var labelEl = document.getElementById('vacMonthLabel');
+  var el = document.getElementById('vacTimelineView');
+  if (!labelEl || !el) return; /* pestaña aún no presente en el DOM */
+
+  updateZoomControls(vacZoom, 'vacZoomLabel', 'btnVacZoomIn', 'btnVacZoomOut');
+  /* rolling=true: todas las vistas del Time-Line de Vacaciones arrancan en el periodo
+     (semana/mes/trimestre/semestre/año) que contiene la fecha de hoy, no en enero. */
+  var range = computeZoomRange(vacZoom, vacAnchor, true);
+  var totalDays = Math.round((range.end - range.start) / 86400000) + 1;
+  var headerLabel = zoomHeaderLabel(vacZoom, range);
+  labelEl.textContent = headerLabel;
+
+  var personaFiltro = document.getElementById('vacPersonaFilter').value;
+  var today = new Date(); today.setHours(0,0,0,0);
+
+  var periodos = allVacaciones.filter(function(v){
+    var ini = v['date:Fecha inicio:start'], fin = v['date:Fecha fin:start'];
+    if (!ini || !fin) return false;
+    if (personaFiltro && v.Persona !== personaFiltro) return false;
+    var vIni = new Date(ini + 'T00:00:00'), vFin = new Date(fin + 'T00:00:00');
+    return vFin >= range.start && vIni <= range.end; /* el periodo se solapa con el rango visible */
+  });
+
+  if (!periodos.length){
+    el.innerHTML = '<div class="empty-msg">No hay vacaciones registradas en ' + esc(headerLabel) +
+      (personaFiltro ? ' para ' + esc(personaFiltro) : '') + '.</div>';
+    return;
+  }
+
+  /* Agrupa por persona: cada persona es una fila, con una barra por cada periodo suyo. */
+  var personas = [];
+  periodos.forEach(function(v){ if (personas.indexOf(v.Persona) === -1) personas.push(v.Persona); });
+  personas.sort(function(a,b){ return a.localeCompare(b); });
+
+  function pct(date){
+    var dd = (date - range.start) / 86400000;
+    dd = Math.max(0, Math.min(totalDays, dd));
+    return dd / totalDays * 100;
+  }
+  var gridTemplateColumns = range.columns.map(function(c){ return c.days + 'fr'; }).join(' ');
+  var dayHeaders = range.columns.map(function(c){
+    var colEnd = new Date(c.start.getTime() + c.days * 86400000);
+    var isToday = today >= c.start && today < colEnd;
+    return '<div class="tl-day' + (isToday ? ' today' : '') + '">' + esc(c.label) + '</div>';
+  }).join('');
+  var gridCells = range.columns.map(function(){ return '<div></div>'; }).join('');
+
+  var tiposPresentes = [];
+  periodos.forEach(function(v){ if (v.Tipo && tiposPresentes.indexOf(v.Tipo) === -1) tiposPresentes.push(v.Tipo); });
+  var legend = tiposPresentes.map(function(t){
+    return '<div class="tl-legend-item"><span class="tl-legend-dot" style="background:' + (TIPO_COLOR[t] || TIPO_COLOR_FALLBACK) + '"></span>' + esc(t) + '</div>';
+  }).join('');
+
+  var bodyRows = personas.map(function(persona){
+    var barsHtml = periodos.filter(function(v){ return v.Persona === persona; }).map(function(v){
+      var vIni = new Date(v['date:Fecha inicio:start'] + 'T00:00:00');
+      var vFin = new Date(v['date:Fecha fin:start'] + 'T00:00:00');
+      var clipIni = vIni < range.start ? range.start : vIni;
+      var clipFin = vFin > range.end ? range.end : vFin;
+      var leftPct = pct(clipIni);
+      var rightPct = pct(new Date(clipFin.getTime() + 86400000)); /* incluye el día completo de fin */
+      var widthPct = Math.max(rightPct - leftPct, 0.5);
+      var color = TIPO_COLOR[v.Tipo] || TIPO_COLOR_FALLBACK;
+      /* Sin texto dentro de la barra: con el color (y la leyenda) basta. Se conserva el
+         detalle como tooltip (title) para quien pase el ratón por encima. */
+      var barTitle = esc(v.Tipo || 'Vacaciones') + (v.Periodo ? ' · ' + esc(v.Periodo) : '');
+      return '<div class="tl-bar" style="left:' + leftPct + '%;width:' + widthPct + '%;background:' + color + '" title="' + barTitle + '"></div>';
+    }).join('');
+    return '<div class="tl-rowlabel"><span class="tl-pname" title="' + esc(persona) + '">' + esc(persona) + '</span></div>' +
+      '<div class="tl-track">' +
+        '<div class="tl-track-grid" style="grid-template-columns:' + gridTemplateColumns + '">' + gridCells + '</div>' +
+        barsHtml +
+      '</div>';
+  }).join('');
+
+  el.innerHTML = (legend ? '<div class="tl-legend">' + legend + '</div>' : '') +
+    '<div class="tl-table">' +
+    '<div class="tl-corner"></div>' +
+    '<div class="tl-daysheader" style="grid-template-columns:' + gridTemplateColumns + '">' + dayHeaders + '</div>' +
+    bodyRows +
+    '</div>';
+}
+
+/* ══════════════════════════════════════════
+   SPRINTS
+   Nota de diseño (pendiente para cuando se adapte REQ-10 a Supabase, tarea aparte):
+   REQ-10 solo debe poder CARGAR sprints en estado "Abierto" (filtro
+   "where estado = 'Abierto'" en su loader) — el mantenimiento de sprints
+   (crear/cerrar) vive únicamente aquí, en REQ-17.
+══════════════════════════════════════════ */
+/* Fecha del lunes de la semana que contiene 'date' (semana ISO, lunes-domingo). */
+function mondayOfWeek(date){
+  var d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  var dayNum = (d.getDay() + 6) % 7; /* lunes=0 ... domingo=6 */
+  d.setDate(d.getDate() - dayNum);
+  return d;
+}
+/* Año-mes-día local sin desfase de zona horaria (a diferencia de toISOString()). */
+function ymd(d){
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+/* Año y número de semana ISO-8601 de una fecha (el jueves de cada semana ISO determina
+   a qué año pertenece la semana, para que los primeros/últimos días del año se asignen
+   a la semana correcta incluso cuando cruzan el límite de año natural). */
+function isoWeekInfo(date){
+  var d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  var dayNum = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dayNum + 3);
+  var isoYear = d.getUTCFullYear();
+  var firstThursday = new Date(Date.UTC(isoYear, 0, 4));
+  var firstDayNum = (firstThursday.getUTCDay() + 6) % 7;
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNum + 3);
+  var isoWeek = 1 + Math.round((d - firstThursday) / (7 * 86400000));
+  return { isoYear: isoYear, isoWeek: isoWeek };
+}
+function renderSprints(){
+  var search = (document.getElementById('sprintSearch').value || '').toLowerCase();
+  var estadoFiltro = document.getElementById('sprintEstadoFilter').value;
+  var list = allSprints.filter(function(s){
+    if (estadoFiltro && s.Estado !== estadoFiltro) return false;
+    return (s.Código||'').toLowerCase().indexOf(search) !== -1;
+  });
+  var el = document.getElementById('sprintsList');
+  if (!list.length){
+    el.innerHTML = '<div class="empty-msg">No hay sprints' +
+      (search || estadoFiltro ? ' que coincidan con el filtro' : ' todavía. Crea el primero con "+ Nuevo sprint" o genera varios con el botón de arriba') + '.</div>';
+    return;
+  }
+  el.innerHTML = list.map(function(s){
+    var badgeClass = s.Estado === 'Abierto' ? 'badge-open' : 'badge-closed';
+    var ini = s['date:Fecha inicio:start'], fin = s['date:Fecha fin:start'];
+    var fechas = (ini || fin) ? (esc(ini||'?') + ' – ' + esc(fin||'?')) : '';
+    return '<div class="contrato-row" onclick="openSprintModal('+jsArg(s.url)+')">' +
+      '<div class="contrato-name">' + esc(s.Código) + ' <span class="badge ' + badgeClass + '">' + esc(s.Estado) + '</span></div>' +
+      '<div class="contrato-meta">' + fechas + '</div>' +
+      '</div>';
+  }).join('');
+}
+function openSprintModal(url){
+  editingSprintUrl = url;
+  var s = url ? allSprints.find(function(x){ return x.url === url; }) : null;
+  document.getElementById('sprintModalTitle').textContent = s ? 'Editar sprint' : 'Nuevo sprint';
+  document.getElementById('spCodigo').value = s ? (s.Código||'') : '';
+  document.getElementById('spEstado').value = s ? (s.Estado||'Abierto') : 'Abierto';
+  document.getElementById('spDescripcion').value = s ? (s.Descripción||'') : '';
+  document.getElementById('spFechaIni').value = s ? (s['date:Fecha inicio:start']||'') : '';
+  document.getElementById('spFechaFin').value = s ? (s['date:Fecha fin:start']||'') : '';
+  document.getElementById('sprintFeedback').style.display = 'none';
+  var dlg = document.getElementById('sprintModal');
+  if (!dlg.open) dlg.showModal();
+}
+async function saveSprint(){
+  var codigo = document.getElementById('spCodigo').value.trim();
+  var estado = document.getElementById('spEstado').value;
+  var descripcion = document.getElementById('spDescripcion').value.trim();
+  var fechaIni = document.getElementById('spFechaIni').value || null;
+  var fechaFin = document.getElementById('spFechaFin').value || null;
+
+  if (!codigo){ showFeedback('sprintFeedback', false, 'El código es obligatorio.'); return; }
+  var dup = allSprints.find(function(s){
+    return s.url !== editingSprintUrl && (s.Código||'').toLowerCase() === codigo.toLowerCase();
+  });
+  if (dup){ showFeedback('sprintFeedback', false, 'Ya existe un sprint con ese código.'); return; }
+
+  var btn = document.getElementById('btnSaveSprint');
+  btn.disabled = true;
+  try {
+    var props = {
+      Código: codigo, Estado: estado, Descripción: descripcion,
+      'date:Fecha inicio:start': fechaIni || '', 'date:Fecha fin:start': fechaFin || ''
+    };
+    if (editingSprintUrl){
+      await sqlUpdate('sprints', editingSprintUrl, {
+        codigo: codigo, estado: estado, descripcion: descripcion || null,
+        fecha_inicio: fechaIni, fecha_fin: fechaFin
+      });
+      var existing = allSprints.find(function(s){ return s.url === editingSprintUrl; });
+      if (existing) Object.assign(existing, props);
+    } else {
+      var newId = await sqlInsert('sprints', {
+        codigo: codigo, estado: estado, descripcion: descripcion || null,
+        fecha_inicio: fechaIni, fecha_fin: fechaFin
+      });
+      allSprints.push(Object.assign({ url: newId }, props));
+    }
+    allSprints.sort(function(a,b){ return (b.Código||'').localeCompare(a.Código||''); });
+    renderSprints();
+    showFeedback('sprintFeedback', true, 'Sprint guardado correctamente.');
+    setTimeout(function(){ document.getElementById('sprintModal').close(); }, 500);
+  } catch(e){
+    showFeedback('sprintFeedback', false, 'Error al guardar: ' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+/* Crea los N próximos sprints semanales (lunes-domingo) a partir de la semana actual,
+   con código yyyy_sNN (año + nº de semana ISO) y estado Abierto. Un único upsert
+   multi-fila con ignoreDuplicates (equivalente a ON CONFLICT (codigo) DO NOTHING),
+   así que sigue siendo una sola llamada de red para todos los sprints. */
+async function generarSprints(){
+  var n = parseInt(document.getElementById('sprintGenCount').value, 10);
+  if (!n || n < 1) n = 1;
+  if (n > 52) n = 52;
+  var btn = document.getElementById('btnGenSprints');
+  btn.disabled = true;
+  document.getElementById('sprintGenFeedback').style.display = 'none';
+  try {
+    var monday = mondayOfWeek(new Date());
+    var rowsToInsert = [];
+    for (var i = 0; i < n; i++){
+      var wStart = new Date(monday); wStart.setDate(wStart.getDate() + i * 7);
+      var wEnd = new Date(wStart); wEnd.setDate(wEnd.getDate() + 6);
+      var info = isoWeekInfo(wStart);
+      var codigo = info.isoYear + '_s' + String(info.isoWeek).padStart(2, '0');
+      rowsToInsert.push({ codigo: codigo, fecha_inicio: ymd(wStart), fecha_fin: ymd(wEnd), estado: 'Abierto' });
+    }
+    var { data: rows, error } = await sb.from('sprints')
+      .upsert(rowsToInsert, { onConflict: 'codigo', ignoreDuplicates: true })
+      .select('id,codigo,descripcion,estado,fecha_inicio,fecha_fin');
+    if (error) throw new Error(error.message);
+    rows.forEach(function(r){
+      allSprints.push({
+        url: r.id, Código: r.codigo, Descripción: r.descripcion, Estado: r.estado,
+        'date:Fecha inicio:start': toDateStr(r.fecha_inicio),
+        'date:Fecha fin:start': toDateStr(r.fecha_fin)
+      });
+    });
+    allSprints.sort(function(a,b){ return (b.Código||'').localeCompare(a.Código||''); });
+    renderSprints();
+    var omitidos = n - rows.length;
+    showFeedback('sprintGenFeedback', true,
+      'Creados ' + rows.length + ' sprint(s)' + (omitidos ? ' (' + omitidos + ' ya existían y se omitieron)' : '') + '.');
+  } catch(e){
+    showFeedback('sprintGenFeedback', false, 'Error al generar sprints: ' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ══════════════════════════════════════════
+   MODALES — cierre genérico
+══════════════════════════════════════════ */
+function closeModal(id){
+  var dlg = document.getElementById(id);
+  if (dlg.open) dlg.close();
+}
+document.addEventListener('DOMContentLoaded', function(){
+  ['userModal','clientModal','projectModal','contractModal','sprintModal'].forEach(function(id){
+    document.getElementById(id).addEventListener('click', function(e){ if (e.target === this) closeModal(id); });
+  });
+});
+
+/* ── Auto-refresco cada 5 minutos ────────────────────────────────────────────
+   Antes llamaba a loadAll() directamente y cada llamada a execute_sql en segundo
+   plano (sin clic real) disparaba un diálogo de aprobación que se iba acumulando
+   en pantalla si no se cerraba a tiempo. Javi observó que pulsar "Actualizar"
+   (recarga real de página) NO dispara ese diálogo aunque también llame a
+   execute_sql nada más cargar — así que en vez de loadAll() se llama a la MISMA
+   función que el botón (refreshPanel(): guarda filtros/zoom/fecha y hace
+   location.reload()), a ver si el paso por una recarga real evita el diálogo
+   igual que con el botón. Si vuelven a acumularse diálogos, desactivar esto de
+   nuevo (ver historial: se quitó una vez ya por este motivo). */
+setInterval(function(){
+  if (!anyModalOpen()) refreshPanel();
+}, 5 * 60 * 1000);
+
+/* ══════════════════════════════════════════
+   AUTENTICACIÓN (Supabase Auth) — sustituye al conector MCP de desarrollador.
+   La sesión real determina lo que RLS deja ver/escribir: no hay bypass.
+══════════════════════════════════════════ */
+var authMode = 'login'; /* 'login' | 'signup' */
+function toggleAuthMode(){
+  authMode = (authMode === 'login') ? 'signup' : 'login';
+  document.getElementById('btnAuthSubmit').textContent = (authMode === 'login') ? 'Iniciar sesión' : 'Crear cuenta';
+  document.getElementById('authToggleLink').textContent = (authMode === 'login') ? '¿Primera vez? Crear cuenta' : '¿Ya tienes cuenta? Inicia sesión';
+  document.getElementById('authFeedback').style.display = 'none';
+}
+async function submitAuth(){
+  var email = document.getElementById('authEmail').value.trim();
+  var password = document.getElementById('authPassword').value;
+  if (!email || !password){ showFeedback('authFeedback', false, 'Introduce email y contraseña.'); return; }
+  var btn = document.getElementById('btnAuthSubmit');
+  btn.disabled = true;
+  try {
+    if (authMode === 'login'){
+      var loginRes = await sb.auth.signInWithPassword({ email: email, password: password });
+      if (loginRes.error) throw loginRes.error;
+      onAuthenticated();
+    } else {
+      var signupRes = await sb.auth.signUp({ email: email, password: password });
+      if (signupRes.error) throw signupRes.error;
+      if (signupRes.data && signupRes.data.session){
+        onAuthenticated();
+      } else {
+        showFeedback('authFeedback', true, 'Cuenta creada. Revisa el correo de ' + email + ' para confirmarla y luego inicia sesión.');
+      }
+    }
+  } catch(e){
+    showFeedback('authFeedback', false, e.message || 'No se pudo completar la operación.');
+  } finally {
+    btn.disabled = false;
+  }
+}
+async function doLogout(){
+  try { await sb.auth.signOut(); } catch(e){ /* se ignora: igualmente recargamos */ }
+  location.reload();
+}
+function onAuthenticated(){
+  document.getElementById('authScreen').style.display = 'none';
+  document.getElementById('appRoot').style.display = '';
+  sb.auth.getUser().then(function(r){
+    var el = document.getElementById('currentUserEmail');
+    if (el && r.data && r.data.user) el.textContent = r.data.user.email;
+  });
+  /* Restaura la pestaña activa y los filtros/buscadores antes de cargar, para que
+     "Actualizar" (recarga real de la página) devuelva a la persona a la pestaña en la
+     que estaba y con los mismos filtros puestos, no siempre a Usuarios en blanco. */
+  restoreFiltersFromStorage();
+  (function restoreTab(){
+    var saved = null;
+    try { saved = localStorage.getItem('req17AdminActiveTab'); } catch(e){ /* almacenamiento no disponible */ }
+    var tabs = ['usuarios', 'proyectos', 'timeline', 'vacaciones', 'sprints'];
+    switchTab(tabs.indexOf(saved) !== -1 ? saved : 'usuarios');
+  })();
+  loadAll();
+}
+/* ── Init: comprueba si ya hay sesión (p.ej. tras "Actualizar") antes de pedir login ── */
+(async function initAuth(){
+  try {
+    var { data } = await sb.auth.getSession();
+    if (data && data.session){ onAuthenticated(); return; }
+  } catch(e){ /* si falla la comprobación, se cae al login normal */ }
+  document.getElementById('authScreen').style.display = '';
+})();
+</script>
+</body>
+</html>
