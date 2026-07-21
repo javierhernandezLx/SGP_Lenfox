@@ -333,6 +333,15 @@ dialog.modal::backdrop{background:rgba(0,0,0,.52);backdrop-filter:blur(3px);}
 </dialog>
 
 <div id="appRoot" style="display:none">
+<!-- ══ AVISO DE CIERRE DE SESIÓN POR INACTIVIDAD ══ -->
+<div id="idleWarning" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.55);align-items:center;justify-content:center;">
+  <div style="background:var(--surface);color:var(--text);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.35);padding:26px 28px;max-width:340px;text-align:center;">
+    <div style="font-size:30px;margin-bottom:8px;">&#9203;</div>
+    <div style="font-weight:700;font-size:15px;margin-bottom:6px;">&iquest;Sigues ah&iacute;?</div>
+    <div style="font-size:13px;color:var(--text2);margin-bottom:18px;">Por seguridad, tu sesi&oacute;n se cerrar&aacute; en <span id="idleCountdown">60</span> segundos por inactividad.</div>
+    <button class="btn-action btn-blue" style="width:100%" onclick="staySignedIn()">Seguir conectado</button>
+  </div>
+</div>
 <!-- ══ HEADER ══════════════════════════════ -->
 <div class="header">
   <div class="hdr-left">
@@ -2253,8 +2262,67 @@ async function forgotPassword(){
   }
 }
 async function doLogout(){
+  stopIdleTracking();
   try { await sb.auth.signOut(); } catch(e){ /* se ignora: igualmente recargamos */ }
   location.reload();
+}
+/* ══════════════════════════════════════════
+   CIERRE DE SESIÓN AUTOMÁTICO POR INACTIVIDAD (a petición de Javi, 2026-07-21): 30 minutos sin
+   actividad (ratón, teclado, scroll, toque, clic) → aviso 60s antes con cuenta atrás y botón
+   "Seguir conectado" → si no responde, se cierra la sesión sola. Solo corre mientras #appRoot
+   está visible — se arranca al final de onAuthenticated() y se para en doLogout().
+══════════════════════════════════════════ */
+var IDLE_LIMIT_MS = 30 * 60 * 1000;
+var IDLE_WARNING_MS = 60 * 1000;
+var _idleTimer = null, _idleWarnTimer = null, _idleCountdownInterval = null, _idleTrackingActive = false;
+var _IDLE_EVENTS = ['mousemove','mousedown','keydown','scroll','touchstart','click'];
+function resetIdleTimer(){
+  if (!_idleTrackingActive) return;
+  clearTimeout(_idleTimer);
+  clearTimeout(_idleWarnTimer);
+  hideIdleWarning();
+  _idleWarnTimer = setTimeout(showIdleWarning, IDLE_LIMIT_MS - IDLE_WARNING_MS);
+  _idleTimer = setTimeout(idleLogout, IDLE_LIMIT_MS);
+}
+function startIdleTracking(){
+  if (_idleTrackingActive) return;
+  _idleTrackingActive = true;
+  _IDLE_EVENTS.forEach(function(evt){ document.addEventListener(evt, resetIdleTimer, { passive: true }); });
+  resetIdleTimer();
+}
+function stopIdleTracking(){
+  _idleTrackingActive = false;
+  clearTimeout(_idleTimer);
+  clearTimeout(_idleWarnTimer);
+  clearInterval(_idleCountdownInterval);
+  hideIdleWarning();
+}
+function showIdleWarning(){
+  var secondsLeft = Math.round(IDLE_WARNING_MS / 1000);
+  var el = document.getElementById('idleWarning');
+  var cd = document.getElementById('idleCountdown');
+  if (!el) return;
+  el.style.display = 'flex';
+  if (cd) cd.textContent = secondsLeft;
+  clearInterval(_idleCountdownInterval);
+  _idleCountdownInterval = setInterval(function(){
+    secondsLeft--;
+    if (cd) cd.textContent = Math.max(secondsLeft, 0);
+    if (secondsLeft <= 0) clearInterval(_idleCountdownInterval);
+  }, 1000);
+}
+function hideIdleWarning(){
+  var el = document.getElementById('idleWarning');
+  if (el) el.style.display = 'none';
+  clearInterval(_idleCountdownInterval);
+}
+function staySignedIn(){
+  resetIdleTimer();
+}
+function idleLogout(){
+  stopIdleTracking();
+  try { sessionStorage.setItem('sgpIdleLogout', '1'); } catch(e){ /* si falla, simplemente no se muestra el aviso al volver */ }
+  doLogout();
 }
 /* _forcePasswordSetup: true cuando el modal de contraseña se abre porque la persona viene de un
    enlace de invitación o de recuperación (aún no tiene contraseña utilizable) — en ese caso
@@ -2360,6 +2428,7 @@ function onAuthenticated(){
     switchTab(tabs.indexOf(saved) !== -1 ? saved : 'usuarios');
   })();
   loadAll();
+  startIdleTracking();
 }
 /* Enlaces de invitación (alta desde Mantenimiento de Usuarios, CC-090/091) o de recuperación de
    contraseña llegan con un fragmento tipo #access_token=...&type=invite (o type=recovery) en la
@@ -2389,17 +2458,32 @@ async function waitForSessionAfterUrl(maxTries){
    PASSWORD_RECOVERY aunque su propia URL no tenga el token. Por eso solo abrimos el modal
    forzado si isPasswordSetupLink() es cierto para ESTA pestaña; y si llega un SIGNED_OUT (lo
    dispara sb.auth.signOut() en savePassword() al terminar en la otra pestaña) mientras el modal
-   forzado sigue abierto aquí, lo cerramos en vez de dejarlo colgado para siempre. */
+   forzado sigue abierto aquí, lo cerramos en vez de dejarlo colgado para siempre.
+
+   También reacciona si el SIGNED_OUT llega con #appRoot ya visible: puede ser el cierre de
+   sesión por inactividad de ESTA misma pestaña (ver idleLogout()) o el de OTRA pestaña que
+   comparte la misma sesión — en ambos casos hay que volver a la pantalla de login aquí también,
+   no solo en la pestaña que lo disparó. */
 sb.auth.onAuthStateChange(function(event, session){
   if (event === 'PASSWORD_RECOVERY' && isPasswordSetupLink()){
     document.getElementById('authScreen').style.display = '';
     openPasswordModal(true);
   }
-  if (event === 'SIGNED_OUT' && _forcePasswordSetup){
-    _forcePasswordSetup = false;
-    var dlg = document.getElementById('passwordModal');
-    if (dlg && dlg.open) dlg.close();
-    document.getElementById('authScreen').style.display = '';
+  if (event === 'SIGNED_OUT'){
+    if (_forcePasswordSetup){
+      _forcePasswordSetup = false;
+      var dlg = document.getElementById('passwordModal');
+      if (dlg && dlg.open) dlg.close();
+      document.getElementById('authScreen').style.display = '';
+    } else {
+      var appRootEl = document.getElementById('appRoot');
+      if (appRootEl && appRootEl.style.display !== 'none'){
+        stopIdleTracking();
+        appRootEl.style.display = 'none';
+        document.getElementById('authScreen').style.display = '';
+        showFeedback('authFeedback', false, 'Tu sesión se ha cerrado.');
+      }
+    }
   }
 });
 /* ── Init: comprueba si ya hay sesión (p.ej. tras "Actualizar") antes de pedir login ── */
@@ -2427,6 +2511,12 @@ sb.auth.onAuthStateChange(function(event, session){
     }
   } catch(e){ /* si falla la comprobación, se cae al login normal */ }
   document.getElementById('authScreen').style.display = '';
+  try {
+    if (sessionStorage.getItem('sgpIdleLogout') === '1'){
+      sessionStorage.removeItem('sgpIdleLogout');
+      showFeedback('authFeedback', false, 'Se cerró tu sesión por inactividad. Vuelve a iniciar sesión.');
+    }
+  } catch(e5){ /* sessionStorage no disponible: simplemente no se muestra el aviso */ }
 })();
 </script>
 </body>
