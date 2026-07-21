@@ -531,6 +531,7 @@ tr.row-drop-below td{border-bottom:3px solid var(--primary);}
     <div class="form-group"><label class="form-label">Contraseña</label><input class="form-control" type="password" id="authPassword" autocomplete="current-password"></div>
     <div class="feedback" id="fb-auth" style="display:none"></div>
     <button class="btn-action btn-blue" id="btnAuthSubmit" onclick="submitAuth()" style="width:100%">Iniciar sesión</button>
+    <div class="auth-toggle"><a id="authForgotLink" onclick="forgotPassword();return false;" href="#">¿Has olvidado tu contraseña?</a></div>
   </div>
 </div>
 
@@ -607,17 +608,18 @@ setTimeout(function(){
 <dialog id="passwordModal">
   <div class="modal-hdr">
     <div class="modal-hdr-info">
-      <div class="modal-title">&#128273; Cambiar contraseña</div>
+      <div class="modal-title" id="pwModalTitle">&#128273; Cambiar contraseña</div>
     </div>
-    <button class="modal-close" onclick="closePasswordModal()" title="Cerrar (ESC)">&#10005;</button>
+    <button class="modal-close" id="pwCloseBtn" onclick="closePasswordModal()" title="Cerrar (ESC)">&#10005;</button>
   </div>
   <div class="modal-body" style="padding:18px">
+    <p id="pwIntro" style="display:none;margin:0 0 12px;font-size:13px;color:var(--muted)">Antes de continuar, elige la contraseña con la que vas a acceder a partir de ahora.</p>
     <div class="form-group"><label class="form-label">Nueva contraseña</label><input class="form-control" type="password" id="pwNew" autocomplete="new-password"></div>
     <div class="form-group"><label class="form-label">Repite la contraseña</label><input class="form-control" type="password" id="pwNew2" autocomplete="new-password"></div>
     <div class="feedback" id="fb-password" style="display:none"></div>
   </div>
   <div class="modal-ftr">
-    <button class="btn-action btn-ghost" onclick="closePasswordModal()">Cancelar</button>
+    <button class="btn-action btn-ghost" id="btnCancelPassword" onclick="closePasswordModal()">Cancelar</button>
     <button class="btn-action btn-blue" id="btnSavePassword" onclick="savePassword()">Guardar</button>
   </div>
 </dialog>
@@ -6141,20 +6143,48 @@ async function submitAuth(){
     btn.disabled = false;
   }
 }
+async function forgotPassword(){
+  var email = document.getElementById('authEmail').value.trim();
+  if (!email){ showFb('auth','err','Escribe tu email arriba y vuelve a pulsar en "¿Has olvidado tu contraseña?".'); return; }
+  var link = document.getElementById('authForgotLink');
+  if (link) link.style.pointerEvents = 'none';
+  try {
+    var res = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    if (res.error) throw res.error;
+    showFb('auth','ok','Si existe una cuenta con ese email, te hemos enviado un enlace para restablecer la contraseña.');
+  } catch(e){
+    showFb('auth','err', e.message || 'No se pudo enviar el enlace de recuperación.');
+  } finally {
+    if (link) link.style.pointerEvents = '';
+  }
+}
 async function doLogout(){
   try { await sb.auth.signOut(); } catch(e){ /* se ignora: igualmente recargamos */ }
   location.reload();
 }
-function openPasswordModal(){
+/* _forcePasswordSetup: true cuando el modal de contraseña se abre porque la persona viene de un
+   enlace de invitación o de recuperación (aún no tiene contraseña utilizable) — en ese caso no se
+   puede cerrar el modal sin guardar una contraseña nueva. */
+var _forcePasswordSetup = false;
+function openPasswordModal(forced){
+  _forcePasswordSetup = !!forced;
   document.getElementById('pwNew').value = '';
   document.getElementById('pwNew2').value = '';
   showFb('password','','');
+  document.getElementById('pwCloseBtn').style.display = _forcePasswordSetup ? 'none' : '';
+  document.getElementById('btnCancelPassword').style.display = _forcePasswordSetup ? 'none' : '';
+  document.getElementById('pwIntro').style.display = _forcePasswordSetup ? 'block' : 'none';
+  document.getElementById('pwModalTitle').textContent = _forcePasswordSetup ? '🔑 Elige tu contraseña' : '🔑 Cambiar contraseña';
   var dlg = document.getElementById('passwordModal');
   if (!dlg.open) dlg.showModal();
 }
 function closePasswordModal(){
+  if (_forcePasswordSetup) return; /* no se puede cerrar sin establecer contraseña */
   document.getElementById('passwordModal').close();
 }
+document.getElementById('passwordModal').addEventListener('cancel', function(e){
+  if (_forcePasswordSetup) e.preventDefault(); /* bloquea el cierre con ESC */
+});
 async function savePassword(){
   var p1 = document.getElementById('pwNew').value;
   var p2 = document.getElementById('pwNew2').value;
@@ -6166,6 +6196,7 @@ async function savePassword(){
     var res = await sb.auth.updateUser({ password: p1 });
     if (res.error) throw res.error;
     showFb('password','ok','Contraseña actualizada.');
+    _forcePasswordSetup = false; /* ya se puede cerrar el modal con normalidad */
     setTimeout(function(){ document.getElementById('passwordModal').close(); }, 800);
   } catch(e){
     showFb('password','err', e.message || 'No se pudo cambiar la contraseña.');
@@ -6183,11 +6214,48 @@ function onAuthenticated(){
   if (lo) lo.style.display = '';
   iniciarPanel();
 }
+/* Enlaces de invitación (alta desde el panel de administración, CC-090/091) o de recuperación de
+   contraseña llegan con un fragmento tipo #access_token=...&type=invite (o type=recovery) en la
+   URL — supabase-js lo detecta solo y crea una sesión, pero hay que reconocer ese caso para abrir
+   el modal de contraseña en vez de dejar a la persona directamente dentro del panel sin haber
+   elegido contraseña nunca. */
+function isPasswordSetupLink(){
+  var h = location.hash || '', s = location.search || '';
+  return /type=recovery/.test(h) || /type=invite/.test(h) || /type=recovery/.test(s) || /type=invite/.test(s);
+}
+async function waitForSessionAfterUrl(maxTries){
+  for (var i = 0; i < maxTries; i++){
+    var r = await sb.auth.getSession();
+    if (r && r.data && r.data.session) return r.data.session;
+    await new Promise(function(res){ setTimeout(res, 250); });
+  }
+  return null;
+}
+/* Red de seguridad: si por lo que sea la detección de sesión de más abajo no llega a abrir el
+   modal (p.ej. supabase-js tarda más de lo esperado en resolver la URL), este listener también
+   reacciona al evento oficial de recuperación de contraseña de Supabase. */
+sb.auth.onAuthStateChange(function(event, session){
+  if (event === 'PASSWORD_RECOVERY'){
+    onAuthenticated();
+    openPasswordModal(true);
+  }
+});
 /* Init: comprueba si ya hay sesión (p.ej. tras "Actualizar") antes de pedir login. */
 (async function initAuth(){
+  var needsPasswordSetup = isPasswordSetupLink();
   try {
-    var { data } = await sb.auth.getSession();
-    if (data && data.session){ onAuthenticated(); return; }
+    var session = null;
+    if (needsPasswordSetup){
+      session = await waitForSessionAfterUrl(12); /* hasta ~3s para dar tiempo a supabase-js */
+    } else {
+      var r = await sb.auth.getSession();
+      session = r && r.data && r.data.session;
+    }
+    if (session){
+      onAuthenticated();
+      if (needsPasswordSetup) openPasswordModal(true);
+      return;
+    }
   } catch(e){ /* si falla la comprobación, se cae al login normal */ }
   document.getElementById('authScreen').style.display = '';
   document.getElementById('loadingOverlay').style.display = 'none';
