@@ -319,6 +319,15 @@ tfoot td.tf-label{text-align:right;color:var(--text3);font-weight:700;text-trans
    botones de acción sueltos dentro de .modal-body en vez de usar un pie de modal dedicado, pero
    passwordModal replica el patrón modal-ftr de req17-web-piloto por claridad visual. */
 .modal-ftr{padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;flex-shrink:0;}
+/* passwordModal es el único diálogo del archivo sin regla propia de posición (el resto usa
+   #idModal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);...} explícito en vez
+   de fiarse del centrado nativo de <dialog>, que no siempre queda realmente centrado) — se añade
+   aquí siguiendo el mismo patrón para que también se muestre centrado en la pantalla. */
+#passwordModal{border:none;border-radius:12px;padding:0;width:min(420px,92vw);
+  background:var(--surface);color:var(--text);box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden;
+  position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);margin:0;}
+#passwordModal[open]{display:flex;flex-direction:column;}
+#passwordModal::backdrop{background:rgba(0,0,0,.52);backdrop-filter:blur(3px);}
 
 .modal-props{padding:13px 18px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;border-bottom:1px solid var(--border);}
 .prop-label{font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:1px;}
