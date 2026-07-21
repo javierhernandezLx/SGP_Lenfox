@@ -531,7 +531,6 @@ tr.row-drop-below td{border-bottom:3px solid var(--primary);}
     <div class="form-group"><label class="form-label">Contraseña</label><input class="form-control" type="password" id="authPassword" autocomplete="current-password"></div>
     <div class="feedback" id="fb-auth" style="display:none"></div>
     <button class="btn-action btn-blue" id="btnAuthSubmit" onclick="submitAuth()" style="width:100%">Iniciar sesión</button>
-    <div class="auth-toggle"><a id="authToggleLink" onclick="toggleAuthMode();return false;" href="#">¿Primera vez? Crear cuenta</a></div>
   </div>
 </div>
 
@@ -6123,14 +6122,9 @@ async function iniciarPanel(){
 /* ══════════════════════════════════════════
    AUTENTICACIÓN (Supabase Auth) — mismo patrón que req17-web-piloto. La sesión real determina lo
    que RLS deja ver/escribir: no hay bypass.
+   Solo login: las cuentas se dan de alta desde el módulo de administración (Mantenimiento de
+   Usuarios), no hay autorregistro público — por eso no existe un modo "signup" aquí.
 ══════════════════════════════════════════ */
-var authMode = 'login'; /* 'login' | 'signup' */
-function toggleAuthMode(){
-  authMode = (authMode === 'login') ? 'signup' : 'login';
-  document.getElementById('btnAuthSubmit').textContent = (authMode === 'login') ? 'Iniciar sesión' : 'Crear cuenta';
-  document.getElementById('authToggleLink').textContent = (authMode === 'login') ? '¿Primera vez? Crear cuenta' : '¿Ya tienes cuenta? Inicia sesión';
-  document.getElementById('fb-auth').style.display = 'none';
-}
 async function submitAuth(){
   var email = document.getElementById('authEmail').value.trim();
   var password = document.getElementById('authPassword').value;
@@ -6138,21 +6132,11 @@ async function submitAuth(){
   var btn = document.getElementById('btnAuthSubmit');
   btn.disabled = true;
   try {
-    if (authMode === 'login'){
-      var loginRes = await sb.auth.signInWithPassword({ email: email, password: password });
-      if (loginRes.error) throw loginRes.error;
-      onAuthenticated();
-    } else {
-      var signupRes = await sb.auth.signUp({ email: email, password: password });
-      if (signupRes.error) throw signupRes.error;
-      if (signupRes.data && signupRes.data.session){
-        onAuthenticated();
-      } else {
-        showFb('auth','ok','Cuenta creada. Revisa el correo de ' + email + ' para confirmarla y luego inicia sesión.');
-      }
-    }
+    var loginRes = await sb.auth.signInWithPassword({ email: email, password: password });
+    if (loginRes.error) throw loginRes.error;
+    onAuthenticated();
   } catch(e){
-    showFb('auth','err', e.message || 'No se pudo completar la operación.');
+    showFb('auth','err', e.message || 'No se pudo iniciar sesión.');
   } finally {
     btn.disabled = false;
   }
