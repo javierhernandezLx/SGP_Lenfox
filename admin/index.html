@@ -2318,12 +2318,22 @@ function startIdleTracking(){
   if (_idleTrackingActive) return;
   _idleTrackingActive = true;
   var last = Date.now();
+  var hadStored = false;
   try {
     var stored = parseInt(localStorage.getItem(IDLE_STORAGE_KEY), 10);
-    if (!isNaN(stored)) last = stored;
+    if (!isNaN(stored)){ last = stored; hadStored = true; }
   } catch(e){ /* localStorage no disponible: se comporta como si la actividad fuese ahora mismo */ }
   _lastActivityMs = last;
   _lastPersistedActivityMs = last;
+  /* CC-097: si no había marca guardada (primer login, o navegador sin localStorage) hay que
+     escribir "last" ya mismo. Si no, y la persona no toca nada en absoluto, la marca nunca se
+     persiste (solo se escribe en actividad real o en "Seguir conectado") — y cada recarga del
+     auto-refresco de 5 min, al no encontrar nada guardado, volvía a tomar "ahora" como última
+     actividad, reiniciando el contador de 30 min para siempre. Exactamente el mismo problema que
+     el fix original intentaba resolver, pero solo para el caso "cero actividad desde el login". */
+  if (!hadStored){
+    try { localStorage.setItem(IDLE_STORAGE_KEY, String(last)); } catch(e){ /* localStorage no disponible */ }
+  }
   _IDLE_EVENTS.forEach(function(evt){ document.addEventListener(evt, onIdleActivityEvent, { passive: true }); });
   window.addEventListener('storage', function(e){
     if (e.key !== IDLE_STORAGE_KEY || !_idleTrackingActive) return;
