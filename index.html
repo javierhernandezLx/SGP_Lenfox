@@ -2395,8 +2395,34 @@ async function loadSprints(){
   allSprints.forEach(function(s){ MAP_SPRINT_POR_ID[s.id] = s.codigo; MAP_SPRINT_POR_CODIGO[s.codigo] = s.id; });
   poblarSelectsSprint();
 }
+/* Rango de fechas del sprint para mostrar junto al código en los desplegables (a petición
+   explícita de Javi, para ubicarse al filtrar o al asignar una tarea a un sprint): usa
+   fecha_inicio/fecha_fin reales si están informadas (ver nota en loadSprints — en la práctica casi
+   nunca lo están); si no, se derivan de la semana ISO codificada en el propio código yyyy_sNN,
+   reutilizando parseSprintCode/isoWeekRange, igual que ya hace sprintActualPorFecha para el resto
+   de cálculos de sprint. Semana completa lunes-domingo (a diferencia del Burn-Down, que muestra
+   solo el tramo laboral L-V) porque aquí el objetivo es ubicarse en el calendario, no calcular
+   capacidad. */
+function sprintDateRangeLabel(s){
+  var ini = soloFecha(s.fecha_inicio), fin = soloFecha(s.fecha_fin);
+  var start, end;
+  if (ini && fin){
+    start = new Date(ini+'T00:00:00');
+    end = new Date(fin+'T00:00:00');
+  } else {
+    var parsed = parseSprintCode(s.codigo);
+    if (!parsed) return '';
+    var range = isoWeekRange(parsed.week, parsed.year);
+    start = range.start; end = range.end;
+  }
+  return fmtDateShort(start) + '–' + fmtDateShort(end);
+}
+function sprintOptionLabel(s){
+  var rango = sprintDateRangeLabel(s);
+  return escHtml(s.codigo) + (rango ? ' (' + rango + ')' : '');
+}
 function poblarSelectsSprint(){
-  var opts = allSprints.map(function(s){ return '<option>'+escHtml(s.codigo)+'</option>'; }).join('');
+  var opts = allSprints.map(function(s){ return '<option value="'+escHtml(s.codigo)+'">'+sprintOptionLabel(s)+'</option>'; }).join('');
   var fSprint = document.getElementById('fSprint');
   if (fSprint) fSprint.innerHTML = '<option value="">Todos</option>' + opts;
   var pSprint = document.getElementById('pSprint');
