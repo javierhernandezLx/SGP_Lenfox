@@ -1052,7 +1052,7 @@ setTimeout(function(){
         </div>
       </div>
       <div style="grid-column:1/-1;display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:-4px">
-        <div><div class="prop-label">Sprint</div><div class="prop-val" id="mSprintInfo" style="font-size:12.5px">—</div></div>
+        <div><div class="prop-label">Sprint</div><div class="prop-val" id="mSprintInfo" style="font-size:12.5px">—</div><div id="mSprintSemanaInfo" style="font-size:11px;color:var(--text3);margin-top:1px"></div></div>
         <div><div class="prop-label">Sprint cliente</div><div class="prop-val" id="mSprintClienteInfo" style="font-size:12.5px">—</div></div>
         <div><div class="prop-label">Prioridad</div><div class="prop-val" id="mPrioridadInfo" style="font-size:12.5px">—</div></div>
       </div>
@@ -2420,6 +2420,22 @@ function sprintDateRangeLabel(s){
 function sprintOptionLabel(s){
   var rango = sprintDateRangeLabel(s);
   return escHtml(s.codigo) + (rango ? ' (' + rango + ')' : '');
+}
+/* Semana de un sprint a partir solo de su código (a petición de Javi: mostrarla debajo del campo
+   "Sprint" de solo lectura en el modal de tarea, compartido por Mis Tareas y Mis Proyectos).
+   Busca la fila real en allSprints por si tiene fecha_inicio/fecha_fin cargadas; si el sprint no
+   está (p.ej. está Cerrado y allSprints solo carga los Abiertos — ver loadSprints), sintetiza un
+   objeto mínimo con el código para que sprintDateRangeLabel derive la semana por el propio código
+   igualmente, sin necesitar la fila de la BD. */
+function sprintWeekLabelForCode(codigo){
+  if (!codigo) return '';
+  var sp = allSprints.find(function(s){ return s.codigo === codigo; }) || { codigo: codigo, fecha_inicio: null, fecha_fin: null };
+  return sprintDateRangeLabel(sp);
+}
+function setSprintInfoDisplay(codigo){
+  document.getElementById('mSprintInfo').textContent = codigo || '—';
+  var semanaEl = document.getElementById('mSprintSemanaInfo');
+  if (semanaEl) semanaEl.textContent = codigo ? sprintWeekLabelForCode(codigo) : '';
 }
 function poblarSelectsSprint(){
   var opts = allSprints.map(function(s){ return '<option value="'+escHtml(s.codigo)+'">'+sprintOptionLabel(s)+'</option>'; }).join('');
@@ -4857,7 +4873,7 @@ function openTaskModal(url, mode){
   document.getElementById('mFechaFin').value = t['date:Fecha fin:start'] || '';
   document.getElementById('mFechaLimite').value = t['date:Fecha limite:start'] || '';
   document.getElementById('mDescripcionEdit').value = t.Descripcion || '';
-  document.getElementById('mSprintInfo').textContent = t.Sprint || '—';
+  setSprintInfoDisplay(t.Sprint);
   document.getElementById('mSprintClienteInfo').textContent = t['Sprint cliente'] || '—';
   document.getElementById('mPrioridadInfo').textContent = (t.Prioridad != null && t.Prioridad !== '') ? t.Prioridad : '—';
 
@@ -5715,7 +5731,7 @@ async function actualizarPlan(btn){
     showFb('plan','ok','✓ Planificación actualizada');
     renderTable(); renderMisTareas(); renderCommentHistory(commentCache[selectedTask.url]||[]);
     document.getElementById('mBadges').innerHTML = estadoBadge(t2().Estado)+' '+prioBadgeModal(t2().Prioridad)+' '+tipoTareaBadge(t2()['Tipo de tarea'])+' '+asignadoChip(t2()['Asignado a']);
-    document.getElementById('mSprintInfo').textContent = t2().Sprint || '—';
+    setSprintInfoDisplay(t2().Sprint);
     document.getElementById('mSprintClienteInfo').textContent = t2()['Sprint cliente'] || '—';
     document.getElementById('mPrioridadInfo').textContent = (t2().Prioridad != null && t2().Prioridad !== '') ? t2().Prioridad : '—';
     if (tallaChanged) { document.getElementById('mTalla').textContent = nuevaTalla || '—'; renderHoursSection(selectedTask); }
