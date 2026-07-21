@@ -313,6 +313,25 @@ dialog.modal::backdrop{background:rgba(0,0,0,.52);backdrop-filter:blur(3px);}
   </div>
 </div>
 
+<!-- ══ MODAL CAMBIAR CONTRASEÑA ═════════════
+     Fuera de #appRoot a propósito: cuando llega alguien por un enlace de invitación o de
+     recuperación (CC-091), este modal se abre ANTES de revelar el panel — con la pantalla de
+     login detrás, no el panel — así que tiene que poder mostrarse aunque #appRoot siga oculto. -->
+<dialog class="modal" id="passwordModal">
+  <div class="modal-hdr"><h2 id="pwModalTitle">Cambiar contraseña</h2>
+    <button class="modal-close" id="pwCloseBtn" onclick="closeModal('passwordModal')">&#10005;</button></div>
+  <div class="modal-body">
+    <p id="pwIntro" style="display:none;margin:0 0 12px;font-size:13px;color:var(--muted)">Antes de continuar, elige la contraseña con la que vas a acceder a partir de ahora.</p>
+    <div class="form-group"><label class="form-label">Contraseña nueva</label><input class="form-control" type="password" id="pwNew" autocomplete="new-password"></div>
+    <div class="form-group"><label class="form-label">Repite la contraseña</label><input class="form-control" type="password" id="pwNew2" autocomplete="new-password"></div>
+    <div class="feedback" id="passwordFeedback"></div>
+  </div>
+  <div class="modal-ftr">
+    <button class="btn-action btn-ghost" id="btnCancelPassword" onclick="closeModal('passwordModal')">Cancelar</button>
+    <button class="btn-action btn-blue" id="btnSavePassword" onclick="savePassword()">Guardar</button>
+  </div>
+</dialog>
+
 <div id="appRoot" style="display:none">
 <!-- ══ HEADER ══════════════════════════════ -->
 <div class="header">
@@ -657,22 +676,6 @@ dialog.modal::backdrop{background:rgba(0,0,0,.52);backdrop-filter:blur(3px);}
   <div class="modal-ftr">
     <button class="btn-action btn-ghost" onclick="closeModal('sprintModal')">Cancelar</button>
     <button class="btn-action btn-blue" id="btnSaveSprint" onclick="saveSprint()">Guardar</button>
-  </div>
-</dialog>
-
-<!-- ══ MODAL CAMBIAR CONTRASEÑA ═════════════ -->
-<dialog class="modal" id="passwordModal">
-  <div class="modal-hdr"><h2 id="pwModalTitle">Cambiar contraseña</h2>
-    <button class="modal-close" id="pwCloseBtn" onclick="closeModal('passwordModal')">&#10005;</button></div>
-  <div class="modal-body">
-    <p id="pwIntro" style="display:none;margin:0 0 12px;font-size:13px;color:var(--muted)">Antes de continuar, elige la contraseña con la que vas a acceder a partir de ahora.</p>
-    <div class="form-group"><label class="form-label">Contraseña nueva</label><input class="form-control" type="password" id="pwNew" autocomplete="new-password"></div>
-    <div class="form-group"><label class="form-label">Repite la contraseña</label><input class="form-control" type="password" id="pwNew2" autocomplete="new-password"></div>
-    <div class="feedback" id="passwordFeedback"></div>
-  </div>
-  <div class="modal-ftr">
-    <button class="btn-action btn-ghost" id="btnCancelPassword" onclick="closeModal('passwordModal')">Cancelar</button>
-    <button class="btn-action btn-blue" id="btnSavePassword" onclick="savePassword()">Guardar</button>
   </div>
 </dialog>
 
@@ -2283,9 +2286,26 @@ async function savePassword(){
   try {
     var { error } = await sb.auth.updateUser({ password: p1 });
     if (error) throw error;
-    showFeedback('passwordFeedback', true, 'Contraseña actualizada.');
-    _forcePasswordSetup = false; /* ya se puede cerrar el modal con normalidad */
-    setTimeout(function(){ document.getElementById('passwordModal').close(); }, 800);
+    if (_forcePasswordSetup){
+      /* Venía de un enlace de invitación/recuperación: no la dejamos dentro de esa sesión
+         "prestada" por el enlace — cierra sesión y que vuelva a entrar con la contraseña que
+         acaba de elegir, como un login normal, con la pantalla de login detrás (no el panel). */
+      var email = '';
+      try {
+        var u = await sb.auth.getUser();
+        email = (u && u.data && u.data.user && u.data.user.email) || '';
+      } catch(e2){ /* si falla, simplemente no precargamos el email */ }
+      try { await sb.auth.signOut(); } catch(e3){ /* se ignora: igualmente volvemos al login */ }
+      _forcePasswordSetup = false;
+      document.getElementById('passwordModal').close();
+      if (email) document.getElementById('authEmail').value = email;
+      document.getElementById('authPassword').value = '';
+      showFeedback('authFeedback', true, 'Contraseña guardada. Ya puedes iniciar sesión.');
+      try { history.replaceState(null, '', location.pathname); } catch(e4){ /* cosmético */ }
+    } else {
+      showFeedback('passwordFeedback', true, 'Contraseña actualizada.');
+      setTimeout(function(){ document.getElementById('passwordModal').close(); }, 800);
+    }
   } catch(e){
     showFeedback('passwordFeedback', false, e.message || 'No se pudo cambiar la contraseña.');
   } finally {
@@ -2359,10 +2379,12 @@ async function waitForSessionAfterUrl(maxTries){
   return null;
 }
 /* Red de seguridad: si por lo que sea la detección de sesión de más abajo no llega a abrir el
-   modal, este listener también reacciona al evento oficial de recuperación de contraseña. */
+   modal, este listener también reacciona al evento oficial de recuperación de contraseña. NO
+   llama a onAuthenticated(): la persona debe ver la pantalla de login detrás del modal, no el
+   panel de administración. */
 sb.auth.onAuthStateChange(function(event, session){
   if (event === 'PASSWORD_RECOVERY'){
-    onAuthenticated();
+    document.getElementById('authScreen').style.display = '';
     openPasswordModal(true);
   }
 });
@@ -2378,8 +2400,15 @@ sb.auth.onAuthStateChange(function(event, session){
       session = r && r.data && r.data.session;
     }
     if (session){
-      onAuthenticated();
-      if (needsPasswordSetup) openPasswordModal(true);
+      if (needsPasswordSetup){
+        /* No revelamos el panel todavía: se queda en la pantalla de login, con el modal de
+           contraseña encima, hasta que la guarde y vuelva a iniciar sesión con normalidad
+           (ver savePassword()). */
+        document.getElementById('authScreen').style.display = '';
+        openPasswordModal(true);
+      } else {
+        onAuthenticated();
+      }
       return;
     }
   } catch(e){ /* si falla la comprobación, se cae al login normal */ }

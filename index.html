@@ -535,6 +535,29 @@ tr.row-drop-below td{border-bottom:3px solid var(--primary);}
   </div>
 </div>
 
+<!-- ══ CAMBIAR CONTRASEÑA (Supabase Auth real) ══
+     Fuera de #appRoot a propósito: cuando llega alguien por un enlace de invitación o de
+     recuperación (CC-091), este modal se abre ANTES de revelar la app — con la pantalla de login
+     detrás, no el panel — así que tiene que poder mostrarse aunque #appRoot siga oculto. -->
+<dialog id="passwordModal">
+  <div class="modal-hdr">
+    <div class="modal-hdr-info">
+      <div class="modal-title" id="pwModalTitle">&#128273; Cambiar contraseña</div>
+    </div>
+    <button class="modal-close" id="pwCloseBtn" onclick="closePasswordModal()" title="Cerrar (ESC)">&#10005;</button>
+  </div>
+  <div class="modal-body" style="padding:18px">
+    <p id="pwIntro" style="display:none;margin:0 0 12px;font-size:13px;color:var(--muted)">Antes de continuar, elige la contraseña con la que vas a acceder a partir de ahora.</p>
+    <div class="form-group"><label class="form-label">Nueva contraseña</label><input class="form-control" type="password" id="pwNew" autocomplete="new-password"></div>
+    <div class="form-group"><label class="form-label">Repite la contraseña</label><input class="form-control" type="password" id="pwNew2" autocomplete="new-password"></div>
+    <div class="feedback" id="fb-password" style="display:none"></div>
+  </div>
+  <div class="modal-ftr">
+    <button class="btn-action btn-ghost" id="btnCancelPassword" onclick="closePasswordModal()">Cancelar</button>
+    <button class="btn-action btn-blue" id="btnSavePassword" onclick="savePassword()">Guardar</button>
+  </div>
+</dialog>
+
 <div id="appRoot" style="display:none">
 <div id="loadingOverlay">
   <div class="loading-card">
@@ -603,26 +626,6 @@ setTimeout(function(){
   <div class="tabbtn" id="tabbtn-cronograma" style="display:none" onclick="switchPageTab('cronograma')">&#128197; Cronograma</div>
   <div class="tabbtn" id="tabbtn-vacaciones" onclick="switchPageTab('vacaciones')">&#127958; Vacaciones del equipo</div>
 </div>
-
-<!-- ══ CAMBIAR CONTRASEÑA (Supabase Auth real) ══ -->
-<dialog id="passwordModal">
-  <div class="modal-hdr">
-    <div class="modal-hdr-info">
-      <div class="modal-title" id="pwModalTitle">&#128273; Cambiar contraseña</div>
-    </div>
-    <button class="modal-close" id="pwCloseBtn" onclick="closePasswordModal()" title="Cerrar (ESC)">&#10005;</button>
-  </div>
-  <div class="modal-body" style="padding:18px">
-    <p id="pwIntro" style="display:none;margin:0 0 12px;font-size:13px;color:var(--muted)">Antes de continuar, elige la contraseña con la que vas a acceder a partir de ahora.</p>
-    <div class="form-group"><label class="form-label">Nueva contraseña</label><input class="form-control" type="password" id="pwNew" autocomplete="new-password"></div>
-    <div class="form-group"><label class="form-label">Repite la contraseña</label><input class="form-control" type="password" id="pwNew2" autocomplete="new-password"></div>
-    <div class="feedback" id="fb-password" style="display:none"></div>
-  </div>
-  <div class="modal-ftr">
-    <button class="btn-action btn-ghost" id="btnCancelPassword" onclick="closePasswordModal()">Cancelar</button>
-    <button class="btn-action btn-blue" id="btnSavePassword" onclick="savePassword()">Guardar</button>
-  </div>
-</dialog>
 
 <!-- ══ PANEL MIS TAREAS ═════════════════════ -->
 <div class="tabpanel visible" id="panel-mistareas">
@@ -6195,9 +6198,26 @@ async function savePassword(){
   try {
     var res = await sb.auth.updateUser({ password: p1 });
     if (res.error) throw res.error;
-    showFb('password','ok','Contraseña actualizada.');
-    _forcePasswordSetup = false; /* ya se puede cerrar el modal con normalidad */
-    setTimeout(function(){ document.getElementById('passwordModal').close(); }, 800);
+    if (_forcePasswordSetup){
+      /* Venía de un enlace de invitación/recuperación: no la dejamos dentro de esa sesión
+         "prestada" por el enlace — cierra sesión y que vuelva a entrar con la contraseña que
+         acaba de elegir, como un login normal, con la pantalla de login detrás (no el panel). */
+      var email = '';
+      try {
+        var u = await sb.auth.getUser();
+        email = (u && u.data && u.data.user && u.data.user.email) || '';
+      } catch(e2){ /* si falla, simplemente no precargamos el email */ }
+      try { await sb.auth.signOut(); } catch(e3){ /* se ignora: igualmente volvemos al login */ }
+      _forcePasswordSetup = false;
+      document.getElementById('passwordModal').close();
+      if (email) document.getElementById('authEmail').value = email;
+      document.getElementById('authPassword').value = '';
+      showFb('auth','ok','Contraseña guardada. Ya puedes iniciar sesión.');
+      try { history.replaceState(null, '', location.pathname); } catch(e4){ /* cosmético */ }
+    } else {
+      showFb('password','ok','Contraseña actualizada.');
+      setTimeout(function(){ document.getElementById('passwordModal').close(); }, 800);
+    }
   } catch(e){
     showFb('password','err', e.message || 'No se pudo cambiar la contraseña.');
   } finally {
@@ -6233,10 +6253,12 @@ async function waitForSessionAfterUrl(maxTries){
 }
 /* Red de seguridad: si por lo que sea la detección de sesión de más abajo no llega a abrir el
    modal (p.ej. supabase-js tarda más de lo esperado en resolver la URL), este listener también
-   reacciona al evento oficial de recuperación de contraseña de Supabase. */
+   reacciona al evento oficial de recuperación de contraseña de Supabase. NO llama a
+   onAuthenticated(): la persona debe ver la pantalla de login detrás del modal, no el panel. */
 sb.auth.onAuthStateChange(function(event, session){
   if (event === 'PASSWORD_RECOVERY'){
-    onAuthenticated();
+    document.getElementById('authScreen').style.display = '';
+    document.getElementById('loadingOverlay').style.display = 'none';
     openPasswordModal(true);
   }
 });
@@ -6252,8 +6274,16 @@ sb.auth.onAuthStateChange(function(event, session){
       session = r && r.data && r.data.session;
     }
     if (session){
-      onAuthenticated();
-      if (needsPasswordSetup) openPasswordModal(true);
+      if (needsPasswordSetup){
+        /* No revelamos el panel todavía: se queda en la pantalla de login, con el modal de
+           contraseña encima, hasta que la guarde y vuelva a iniciar sesión con normalidad
+           (ver savePassword()). */
+        document.getElementById('authScreen').style.display = '';
+        document.getElementById('loadingOverlay').style.display = 'none';
+        openPasswordModal(true);
+      } else {
+        onAuthenticated();
+      }
       return;
     }
   } catch(e){ /* si falla la comprobación, se cae al login normal */ }
