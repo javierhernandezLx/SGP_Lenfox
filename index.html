@@ -6251,24 +6251,69 @@ async function doLogout(){
    actividad (ratón, teclado, scroll, toque, clic) → aviso 60s antes con cuenta atrás y botón
    "Seguir conectado" → si no responde, se cierra la sesión sola. Solo corre mientras #appRoot
    está visible — se arranca al final de onAuthenticated() y se para en doLogout().
-══════════════════════════════════════════ */
+
+   OJO — la marca de última actividad se guarda en localStorage (clave IDLE_STORAGE_KEY), NO en
+   una variable de memoria: el auto-refresco de la app (refrescarArtefactoCompleto(), cada 5 min)
+   hace location.reload(), que reinicia todo el JS — si el reloj de inactividad arrancara siempre
+   de 0 al recargar, el auto-refresco cada 5 min impediría PARA SIEMPRE que el cierre por
+   inactividad llegara a dispararse, por mucho que la persona llevara horas sin tocar nada. Al
+   guardar la marca de tiempo real en localStorage, el contador sobrevive a la recarga y sigue
+   contando desde la última interacción de verdad. Como localStorage también se comparte entre
+   pestañas del mismo origen, un evento 'storage' sincroniza el reloj si hay otra pestaña activa. */
 var IDLE_LIMIT_MS = 30 * 60 * 1000;
 var IDLE_WARNING_MS = 60 * 1000;
+var IDLE_STORAGE_KEY = 'sgpLastActivity';
 var _idleTimer = null, _idleWarnTimer = null, _idleCountdownInterval = null, _idleTrackingActive = false;
+var _lastActivityMs = Date.now();
+var _lastPersistedActivityMs = 0;
 var _IDLE_EVENTS = ['mousemove','mousedown','keydown','scroll','touchstart','click'];
-function resetIdleTimer(){
-  if (!_idleTrackingActive) return;
+function scheduleIdleTimersFrom(lastActivityMs){
   clearTimeout(_idleTimer);
   clearTimeout(_idleWarnTimer);
   hideIdleWarning();
-  _idleWarnTimer = setTimeout(showIdleWarning, IDLE_LIMIT_MS - IDLE_WARNING_MS);
-  _idleTimer = setTimeout(idleLogout, IDLE_LIMIT_MS);
+  var remaining = IDLE_LIMIT_MS - (Date.now() - lastActivityMs);
+  if (remaining <= 0){ idleLogout(); return; }
+  var warnDelay = remaining - IDLE_WARNING_MS;
+  if (warnDelay <= 0){
+    showIdleWarning(remaining);
+  } else {
+    _idleWarnTimer = setTimeout(function(){ showIdleWarning(IDLE_WARNING_MS); }, warnDelay);
+  }
+  _idleTimer = setTimeout(idleLogout, remaining);
+}
+function onIdleActivityEvent(){
+  if (!_idleTrackingActive) return;
+  var now = Date.now();
+  _lastActivityMs = now;
+  scheduleIdleTimersFrom(now);
+  /* No escribimos en localStorage en cada mousemove (sería demasiado ruido/escritura) — basta con
+     hacerlo cada pocos segundos, suficiente para que sobreviva a una recarga o se entere otra
+     pestaña. */
+  if (now - _lastPersistedActivityMs > 5000){
+    _lastPersistedActivityMs = now;
+    try { localStorage.setItem(IDLE_STORAGE_KEY, String(now)); } catch(e){ /* localStorage no disponible */ }
+  }
 }
 function startIdleTracking(){
   if (_idleTrackingActive) return;
   _idleTrackingActive = true;
-  _IDLE_EVENTS.forEach(function(evt){ document.addEventListener(evt, resetIdleTimer, { passive: true }); });
-  resetIdleTimer();
+  var last = Date.now();
+  try {
+    var stored = parseInt(localStorage.getItem(IDLE_STORAGE_KEY), 10);
+    if (!isNaN(stored)) last = stored;
+  } catch(e){ /* localStorage no disponible: se comporta como si la actividad fuese ahora mismo */ }
+  _lastActivityMs = last;
+  _lastPersistedActivityMs = last;
+  _IDLE_EVENTS.forEach(function(evt){ document.addEventListener(evt, onIdleActivityEvent, { passive: true }); });
+  window.addEventListener('storage', function(e){
+    if (e.key !== IDLE_STORAGE_KEY || !_idleTrackingActive) return;
+    var v = parseInt(e.newValue, 10);
+    if (!isNaN(v) && v > _lastActivityMs){
+      _lastActivityMs = v;
+      scheduleIdleTimersFrom(v);
+    }
+  });
+  scheduleIdleTimersFrom(last);
 }
 function stopIdleTracking(){
   _idleTrackingActive = false;
@@ -6277,8 +6322,8 @@ function stopIdleTracking(){
   clearInterval(_idleCountdownInterval);
   hideIdleWarning();
 }
-function showIdleWarning(){
-  var secondsLeft = Math.round(IDLE_WARNING_MS / 1000);
+function showIdleWarning(msRemaining){
+  var secondsLeft = Math.round((msRemaining !== undefined ? msRemaining : IDLE_WARNING_MS) / 1000);
   var el = document.getElementById('idleWarning');
   var cd = document.getElementById('idleCountdown');
   if (!el) return;
@@ -6297,7 +6342,11 @@ function hideIdleWarning(){
   clearInterval(_idleCountdownInterval);
 }
 function staySignedIn(){
-  resetIdleTimer();
+  var now = Date.now();
+  _lastActivityMs = now;
+  _lastPersistedActivityMs = now;
+  try { localStorage.setItem(IDLE_STORAGE_KEY, String(now)); } catch(e){ /* localStorage no disponible */ }
+  scheduleIdleTimersFrom(now);
 }
 function idleLogout(){
   stopIdleTracking();
