@@ -6261,6 +6261,13 @@ async function submitAuth(){
   try {
     var loginRes = await sb.auth.signInWithPassword({ email: email, password: password });
     if (loginRes.error) throw loginRes.error;
+    /* CC-100: un login manual con email+contraseña ES actividad real por definición, así que
+       sellamos "ahora" en localStorage ANTES de que onAuthenticated()->startIdleTracking() lea la
+       marca guardada. Si no, una marca vieja de una sesión anterior (de hace más de 30 min, p.ej.
+       de una prueba de antes) hace que startIdleTracking() calcule tiempo restante negativo y
+       cierre la sesión recién iniciada al instante — bucle infinito de login→logout inmediato
+       hasta que la marca se sobreescribiera por casualidad con alguna actividad real. */
+    try { localStorage.setItem(IDLE_STORAGE_KEY, String(Date.now())); } catch(e2){ /* localStorage no disponible */ }
     onAuthenticated();
   } catch(e){
     showFb('auth','err', e.message || 'No se pudo iniciar sesión.');
