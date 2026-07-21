@@ -4,7 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SGP-Lenfox</title>
-<link rel="icon" type="image/png" href="https://i0.wp.com/lenfox.com/wp-content/uploads/2021/04/lx_favicon.png?fit=64%2C64&ssl=1">
+<link rel="icon" type="image/png" sizes="64x64" href="https://i0.wp.com/lenfox.com/wp-content/uploads/2021/04/lx_favicon.png?fit=64%2C64&ssl=1">
+<link rel="shortcut icon" type="image/png" href="https://i0.wp.com/lenfox.com/wp-content/uploads/2021/04/lx_favicon.png?fit=64%2C64&ssl=1">
+<link rel="apple-touch-icon" href="https://i0.wp.com/lenfox.com/wp-content/uploads/2021/04/lx_favicon.png?fit=180%2C180&ssl=1">
 <!-- Publicación como app web (Fases 6-7 de SP-06-07): habla directamente con Supabase vía
      supabase-js + Supabase Auth (sin pasar por Cowork ni por el conector MCP de desarrollador),
      respetando Row Level Security con la sesión real del usuario — mismo patrón que
@@ -311,7 +313,7 @@ tfoot td.tf-label{text-align:right;color:var(--text3);font-weight:700;text-trans
 .modal-close{border:none;background:rgba(255,255,255,.15);color:#fff;width:30px;height:30px;border-radius:6px;
   cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .modal-close:hover{background:rgba(255,255,255,.3);}
-.modal-body{flex:1;overflow-y:auto;position:relative;
+.modal-body{flex:1 1 auto;min-width:0;min-height:0;overflow-y:auto;position:relative;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='240' viewBox='0 0 320 240'%3E%3Cg fill='%232563eb' fill-opacity='0.06'%3E%3Ccircle cx='190' cy='130' r='60'/%3E%3Ccircle cx='90' cy='170' r='38'/%3E%3Ccircle cx='260' cy='60' r='30'/%3E%3Ccircle cx='36' cy='48' r='24'/%3E%3Ccircle cx='232' cy='182' r='20'/%3E%3Ccircle cx='134' cy='30' r='18'/%3E%3Ccircle cx='288' cy='182' r='14'/%3E%3C/g%3E%3C/svg%3E");
   background-repeat:repeat; background-size:320px 240px; background-attachment:local;}
 .modal-body > *{position:relative;z-index:1;}
@@ -6192,6 +6194,11 @@ async function savePassword(){
 function onAuthenticated(){
   document.getElementById('authScreen').style.display = 'none';
   document.getElementById('appRoot').style.display = '';
+  /* initAuth() puede haber ocultado loadingOverlay (rama sin sesión, antes de mostrar el login);
+     hay que restaurarlo aquí o tras un login real la app se ve vacía en vez de mostrar la
+     pantalla de carga del plan de trabajo. */
+  var lo = document.getElementById('loadingOverlay');
+  if (lo) lo.style.display = '';
   iniciarPanel();
 }
 /* Init: comprueba si ya hay sesión (p.ej. tras "Actualizar") antes de pedir login. */
