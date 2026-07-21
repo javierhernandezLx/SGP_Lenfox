@@ -796,6 +796,7 @@ setTimeout(function(){
     </div>
   </div>
   <div class="search-bar-actions">
+    <button class="btn-refresh" id="btnExportarDatos" onclick="exportarDatosProyecto()" style="display:none;background:#2563eb;color:#fff" title="Exporta el backlog, las dedicaciones y un resumen del proyecto seleccionado a un Excel descargable">&#128190; Exportar datos</button>
     <button class="btn-refresh" id="btnNuevaTarea" onclick="openNewTaskModal()" style="background:#16a34a;color:#fff">&#10133; Nueva tarea</button>
   </div>
 </div>
@@ -1797,6 +1798,7 @@ function refrescarSelectsProyecto(){
     }).join('');
   }
   if (typeof updateMsProyectoBtnLabel === 'function') updateMsProyectoBtnLabel();
+  if (typeof updateBtnExportarVisibility === 'function') updateBtnExportarVisibility();
 
   var ntProy = document.getElementById('ntProyecto');
   if (ntProy) ntProy.innerHTML = '<option value="">— selecciona —</option>' + nombresProy.map(function(n){ return '<option>'+escHtml(n)+'</option>'; }).join('');
@@ -2438,7 +2440,67 @@ function updateMsProyectoBtnLabel(){
 }
 function onMsProyectoChange(){
   updateMsProyectoBtnLabel();
+  updateBtnExportarVisibility();
   renderTableReset();
+}
+
+/* Botón "Exportar datos" (a petición explícita de Javi, ver Edge Function
+   export-proyecto-excel): solo tiene sentido si hay EXACTAMENTE un proyecto seleccionado en el
+   filtro multi-proyecto de "Mis Proyectos" — con "Todos" (ninguno marcado) o varios marcados no
+   hay un único proyecto que exportar. */
+function updateBtnExportarVisibility(){
+  var btn = document.getElementById('btnExportarDatos');
+  if (!btn) return;
+  btn.style.display = (getProyectosSel().length === 1) ? '' : 'none';
+}
+
+/* Exporta a un Excel descargable (mismo formato que Plantilla_Exportacion_Proyecto_SGP.xlsx:
+   Datos del Proyecto + 2 tablas cruzadas por fórmula, Backlog completo, Dedicaciones) el ÚNICO
+   proyecto seleccionado en el filtro de "Mis Proyectos". La generación ocurre en la Edge Function
+   export-proyecto-excel (service_role, valida ahí mismo que quien llama es Project Manager o
+   Director activo de ESE proyecto — mismo criterio que proyectosVisibles(), sin bypass de
+   Administrador), así que el navegador solo pide el fichero ya construido y lo descarga. */
+async function exportarDatosProyecto(){
+  var sel = getProyectosSel();
+  if (sel.length !== 1) { showToast('Selecciona exactamente un proyecto para exportar', 'err'); return; }
+  var proy = MAP_PROYECTO_POR_NOMBRE[sel[0]];
+  if (!proy || !proy.url) { showToast('No se pudo identificar el proyecto seleccionado', 'err'); return; }
+
+  var btn = document.getElementById('btnExportarDatos');
+  var orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '&#8987; Exportando...';
+  try {
+    var sesRes = await sb.auth.getSession();
+    var token = sesRes && sesRes.data && sesRes.data.session && sesRes.data.session.access_token;
+    if (!token) { showToast('Sesión no válida, vuelve a iniciar sesión', 'err'); return; }
+
+    var res = await fetch(SUPABASE_URL + '/functions/v1/export-proyecto-excel', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ proyecto_id: proy.url }),
+    });
+    if (!res.ok) {
+      var errBody = await res.json().catch(function(){ return {}; });
+      showToast(errBody.error || ('Error al exportar (HTTP ' + res.status + ')'), 'err');
+      return;
+    }
+    var blob = await res.blob();
+    var disposition = res.headers.get('Content-Disposition') || '';
+    var m = /filename="?([^"]+)"?/.exec(disposition);
+    var fileName = m ? m[1] : ('SGP-Lenfox_' + sel[0] + '.xlsx');
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = fileName;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 5000);
+    showToast('Excel exportado: ' + fileName, 'ok');
+  } catch(e) {
+    showToast('Error al exportar: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
 }
 function msProyectoSelectAll(){
   document.querySelectorAll('.ms-proyecto-chk').forEach(function(chk){ chk.checked = true; });
