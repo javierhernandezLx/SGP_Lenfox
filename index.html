@@ -4,9 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SGP-Lenfox</title>
-<link rel="icon" type="image/png" sizes="64x64" href="https://i0.wp.com/lenfox.com/wp-content/uploads/2021/04/lx_favicon.png?fit=64%2C64&ssl=1">
-<link rel="shortcut icon" type="image/png" href="https://i0.wp.com/lenfox.com/wp-content/uploads/2021/04/lx_favicon.png?fit=64%2C64&ssl=1">
-<link rel="apple-touch-icon" href="https://i0.wp.com/lenfox.com/wp-content/uploads/2021/04/lx_favicon.png?fit=180%2C180&ssl=1">
+<!-- Favicon autoalojado como data URI (SVG inline, monograma "Lx" en azul de marca #2563eb):
+     el favicon hotlinkeado a i0.wp.com no cargaba en Safari (tab mostraba icono genérico/inicial),
+     aunque sí en Chrome — probablemente por el trato distinto que da Safari a la petición de
+     favicon (referrer/ITP) frente a una <img> normal. Con un data URI del mismo origen (inline,
+     sin red) se elimina esa dependencia por completo y funciona igual en todos los navegadores. -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CjxyZWN0IHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgcng9IjE0IiBmaWxsPSIjMjU2M2ViIi8+Cjx0ZXh0IHg9IjMyIiB5PSI0NCIgZm9udC1mYW1pbHk9IkFyaWFsLCBIZWx2ZXRpY2EsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMzAiIGZvbnQtd2VpZ2h0PSI4MDAiIGZpbGw9IiNmZmZmZmYiIHRleHQtYW5jaG9yPSJtaWRkbGUiPkx4PC90ZXh0Pgo8L3N2Zz4K">
+<link rel="shortcut icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CjxyZWN0IHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgcng9IjE0IiBmaWxsPSIjMjU2M2ViIi8+Cjx0ZXh0IHg9IjMyIiB5PSI0NCIgZm9udC1mYW1pbHk9IkFyaWFsLCBIZWx2ZXRpY2EsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMzAiIGZvbnQtd2VpZ2h0PSI4MDAiIGZpbGw9IiNmZmZmZmYiIHRleHQtYW5jaG9yPSJtaWRkbGUiPkx4PC90ZXh0Pgo8L3N2Zz4K">
 <!-- Publicación como app web (Fases 6-7 de SP-06-07): habla directamente con Supabase vía
      supabase-js + Supabase Auth (sin pasar por Cowork ni por el conector MCP de desarrollador),
      respetando Row Level Security con la sesión real del usuario — mismo patrón que
