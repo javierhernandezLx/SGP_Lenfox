@@ -5964,8 +5964,20 @@ function handleTextareaInput(el){
   if (match) { showMentionDropdown(match[1].toLowerCase()); }
   else { hideMentionDropdown(); }
 }
+/* Personas que se ofrecen al escribir "@" en un comentario (a petición explícita de Javi: antes
+   salía TEAM_MEMBERS entera, es decir, TODOS los usuarios de la app, sin importar si tenían nada
+   que ver con el proyecto de la tarea abierta). Reutiliza personasConAccesoAProyecto() — la misma
+   función que ya filtra "Asignado a"/"Reasignar" por el proyecto de la tarea (incluye siempre a
+   los Administradores). Si el proyecto no tiene todavía a nadie con rol asignado, se cae a la
+   lista completa (mismo criterio de respaldo que populateAsignadoPlanSelect), para no dejar el
+   autocompletado vacío. */
+function mentionCandidates(){
+  var nombres = personasConAccesoAProyecto(selectedTask && selectedTask._proyectoUrl);
+  if (!nombres.length) nombres = TEAM_MEMBERS;
+  return nombres;
+}
 function showMentionDropdown(search){
-  var filtered = TEAM_MEMBERS.filter(function(m){ return m.toLowerCase().startsWith(search); });
+  var filtered = mentionCandidates().filter(function(m){ return m.toLowerCase().startsWith(search); });
   var dd = document.getElementById('mentionDropdown');
   if (!filtered.length || !dd) { hideMentionDropdown(); return; }
   dd.innerHTML = filtered.map(function(m){
