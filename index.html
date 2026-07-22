@@ -10,6 +10,7 @@
      respetando Row Level Security con la sesión real del usuario — mismo patrón que
      req17-web-piloto (ver [[sgp_lenfox_piloto_web_req17]]). -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js" integrity="sha384-iU8HYtnGQ8Cy4zl7gbNMOhsDTTKX02BTXptVP/vqAWIaTfM7isw76iyZCsjL2eVi" crossorigin="anonymous"></script>
 <style>
 :root{
@@ -539,6 +540,7 @@ tr.row-drop-below td{border-bottom:3px solid var(--primary);}
     <div class="form-group"><label class="form-label">Email</label><input class="form-control" type="email" id="authEmail" autocomplete="email"></div>
     <div class="form-group"><label class="form-label">Contraseña</label><input class="form-control" type="password" id="authPassword" autocomplete="current-password"></div>
     <div class="feedback" id="fb-auth" style="display:none"></div>
+    <div class="cf-turnstile" id="turnstileWidget" style="margin:4px 0 14px" data-sitekey="0x4AAAAAAD7SXocPG_6I1mpP" data-callback="onTurnstileSuccess" data-expired-callback="onTurnstileExpired" data-error-callback="onTurnstileExpired"></div>
     <button class="btn-action btn-blue" id="btnAuthSubmit" onclick="submitAuth()" style="width:100%">Iniciar sesión</button>
     <div class="auth-toggle"><a id="authForgotLink" onclick="forgotPassword();return false;" href="#">¿Has olvidado tu contraseña?</a></div>
   </div>
@@ -6286,14 +6288,26 @@ async function iniciarPanel(){
    Solo login: las cuentas se dan de alta desde el módulo de administración (Mantenimiento de
    Usuarios), no hay autorregistro público — por eso no existe un modo "signup" aquí.
 ══════════════════════════════════════════ */
+/* H-04/CAPTCHA (2026-07-22): widget de Cloudflare Turnstile en la pantalla de login.
+   Se renderiza solo (data-sitekey en el HTML), y su callback guarda el token en _turnstileToken.
+   Los tokens de Turnstile son de un solo uso: hay que resetear el widget (y pedir uno nuevo)
+   después de CADA intento, tanto si login/recuperación tuvo éxito como si falló. */
+var _turnstileToken = '';
+function onTurnstileSuccess(token){ _turnstileToken = token; }
+function onTurnstileExpired(){ _turnstileToken = ''; }
+function resetTurnstile(){
+  _turnstileToken = '';
+  try { if (window.turnstile) turnstile.reset(); } catch(e){ /* widget aun no cargado */ }
+}
 async function submitAuth(){
   var email = document.getElementById('authEmail').value.trim();
   var password = document.getElementById('authPassword').value;
   if (!email || !password){ showFb('auth','err','Introduce email y contraseña.'); return; }
+  if (!_turnstileToken){ showFb('auth','err','Completa la verificación de seguridad.'); return; }
   var btn = document.getElementById('btnAuthSubmit');
   btn.disabled = true;
   try {
-    var loginRes = await sb.auth.signInWithPassword({ email: email, password: password });
+    var loginRes = await sb.auth.signInWithPassword({ email: email, password: password, options: { captchaToken: _turnstileToken } });
     if (loginRes.error) throw loginRes.error;
     /* CC-100: un login manual con email+contraseña ES actividad real por definición, así que
        sellamos "ahora" en localStorage ANTES de que onAuthenticated()->startIdleTracking() lea la
@@ -6307,21 +6321,24 @@ async function submitAuth(){
     showFb('auth','err', e.message || 'No se pudo iniciar sesión.');
   } finally {
     btn.disabled = false;
+    resetTurnstile();
   }
 }
 async function forgotPassword(){
   var email = document.getElementById('authEmail').value.trim();
   if (!email){ showFb('auth','err','Escribe tu email arriba y vuelve a pulsar en "¿Has olvidado tu contraseña?".'); return; }
+  if (!_turnstileToken){ showFb('auth','err','Completa la verificación de seguridad antes de continuar.'); return; }
   var link = document.getElementById('authForgotLink');
   if (link) link.style.pointerEvents = 'none';
   try {
-    var res = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    var res = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname, captchaToken: _turnstileToken });
     if (res.error) throw res.error;
     showFb('auth','ok','Si existe una cuenta con ese email, te hemos enviado un enlace para restablecer la contraseña.');
   } catch(e){
     showFb('auth','err', e.message || 'No se pudo enviar el enlace de recuperación.');
   } finally {
     if (link) link.style.pointerEvents = '';
+    resetTurnstile();
   }
 }
 async function doLogout(){
