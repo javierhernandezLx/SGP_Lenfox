@@ -5976,11 +5976,20 @@ async function markAsRead(idx){
   renderMencionesPnl();
 }
 
+/* Bug reportado por Javi (2026-07-22): al abrir una tarea desde el panel de Menciones no se
+   pasaba "mode" a openTaskModal(), que por defecto cae en 'pm' -- asi que un Team Member veia el
+   modal completo de PM (boton Copiar, pestanas Planificar/Jerarquia, Fecha/Descripcion editables,
+   opcion Eliminada...) para CUALQUIER tarea mencionada, sin importar su rol real en ese proyecto.
+   Fix: mismo criterio que puedeEditarDed (esPMoDirectorDeProyecto) -- si el usuario es PM/Director
+   del proyecto de esa tarea concreta ve el modal 'pm' (coherente con lo que veria si la abriera
+   desde Mis Proyectos), si no, 'team' (coherente con Mis Tareas). */
 function viewMentionTask(idx){
   var m = _mentionItems[idx];
   if (!m) return;
   closeMencionesPnl();
-  openTaskModal(m.taskUrl);
+  var t = allTasksRaw.find(function(x){ return x.url === m.taskUrl; });
+  var mode = (t && esPMoDirectorDeProyecto(t._proyectoUrl)) ? 'pm' : 'team';
+  openTaskModal(m.taskUrl, mode);
 }
 
 /* ── @ autocomplete ──────────────────────── */
