@@ -324,7 +324,9 @@ dialog.modal::backdrop{background:rgba(0,0,0,.52);backdrop-filter:blur(3px);}
     <button class="modal-close" id="pwCloseBtn" onclick="closeModal('passwordModal')">&#10005;</button></div>
   <div class="modal-body">
     <p id="pwIntro" style="display:none;margin:0 0 12px;font-size:13px;color:var(--muted)">Antes de continuar, elige la contraseña con la que vas a acceder a partir de ahora.</p>
-    <div class="form-group"><label class="form-label">Contraseña nueva</label><input class="form-control" type="password" id="pwNew" autocomplete="new-password"></div>
+    <div class="form-group"><label class="form-label">Contraseña nueva</label><input class="form-control" type="password" id="pwNew" autocomplete="new-password">
+      <div style="font-size:11px;color:var(--text3);margin-top:2px">Mínimo 8 caracteres, combinando letras y números.</div>
+    </div>
     <div class="form-group"><label class="form-label">Repite la contraseña</label><input class="form-control" type="password" id="pwNew2" autocomplete="new-password"></div>
     <div class="feedback" id="passwordFeedback"></div>
   </div>
@@ -2430,7 +2432,7 @@ document.getElementById('passwordModal').addEventListener('cancel', function(e){
 async function savePassword(){
   var p1 = document.getElementById('pwNew').value;
   var p2 = document.getElementById('pwNew2').value;
-  if (!p1 || p1.length < 6){ showFeedback('passwordFeedback', false, 'Mínimo 6 caracteres.'); return; }
+  if (!p1 || p1.length < 8 || !/[a-zA-Z]/.test(p1) || !/[0-9]/.test(p1)){ showFeedback('passwordFeedback', false, 'Mínimo 8 caracteres, combinando letras y números.'); return; }
   if (p1 !== p2){ showFeedback('passwordFeedback', false, 'Las dos contraseñas no coinciden.'); return; }
   var btn = document.getElementById('btnSavePassword');
   btn.disabled = true;
