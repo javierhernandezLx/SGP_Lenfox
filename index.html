@@ -1783,6 +1783,26 @@ function proyectosCronograma(){
   return Object.keys(urls);
 }
 
+/* ¿Es CURRENT_USER Project Manager o Director de ESTE proyecto concreto? Mismo criterio EXACTO
+   que proyectosVisibles()/proyectosCronograma() — SIN bypass de Administrador (decisión explícita
+   de Javi, 2026-07-21: "administrador=true" no basta por sí solo para decidir permisos sobre un
+   proyecto concreto). Se usa para decidir si se puede editar la dedicación (horas) de OTRA
+   persona — la RLS del lado servidor aplica exactamente esta misma regla (auditoría de seguridad,
+   hallazgo H-01: función es_pm_o_director_proyecto()), así que ocultar aquí el enlace "Editar"
+   cuando no aplica evita un intento que el servidor rechazaría igualmente. */
+function esPMoDirectorDeProyecto(proyectoUrl){
+  if (!proyectoUrl) return false;
+  var yo = MAP_USUARIO_POR_NOMBRE[CURRENT_USER];
+  var miUrl = yo && yo.url;
+  if (!miUrl) return false;
+  return allRoles.some(function(r){
+    if (r.Activo !== '__YES__') return false;
+    if (r.Rol !== 'Project Manager' && r.Rol !== 'Director') return false;
+    if (relFirstUrl(r.Usuario) !== miUrl) return false;
+    return relFirstUrl(r.Proyecto) === proyectoUrl;
+  });
+}
+
 /* Reconstruye los desplegables de Proyecto que dependen de proyectosVisibles() (es decir, de
    CURRENT_USER). En la publicación web, CURRENT_USER queda fijo para toda la sesión (identidad
    real de Supabase Auth, sin "Actuar como"), así que basta con llamarla una vez desde
@@ -4968,7 +4988,8 @@ function renderDedicaciones(t){
     '</tr></thead><tbody>' +
     rows.map(function(d,i){
       var bg = i%2===0 ? 'transparent' : 'var(--surface2)';
-      var editLink = d.url ? '<a href="#" style="font-size:10.5px;color:var(--primary);text-decoration:underline" onclick="editarDedicacion(\''+escAttr(d.url)+'\');return false;">Editar</a>' : '';
+      var puedeEditarDed = d.url && (d.Persona === CURRENT_USER || esPMoDirectorDeProyecto(t._proyectoUrl));
+      var editLink = puedeEditarDed ? '<a href="#" style="font-size:10.5px;color:var(--primary);text-decoration:underline" onclick="editarDedicacion(\''+escAttr(d.url)+'\');return false;">Editar</a>' : '';
       return '<tr style="background:'+bg+'">' +
         '<td style="padding:5px 8px;border-bottom:1px solid var(--border);color:var(--text2);white-space:nowrap">'+escHtml(fmtDate(d['date:Fecha:start']))+'</td>' +
         '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">'+escHtml(d.Persona||'—')+'</td>' +
@@ -5006,7 +5027,8 @@ function renderDedicUltimas(t){
     '</tr></thead><tbody>' +
     ultimas.map(function(d,i){
       var bg = i%2===0 ? 'transparent' : 'var(--surface2)';
-      var editLink = d.url ? '<a href="#" style="font-size:10px;color:var(--primary);text-decoration:underline" onclick="editarDedicacion(\''+escAttr(d.url)+'\');return false;">Editar</a>' : '';
+      var puedeEditarDed = d.url && (d.Persona === CURRENT_USER || esPMoDirectorDeProyecto(t._proyectoUrl));
+      var editLink = puedeEditarDed ? '<a href="#" style="font-size:10px;color:var(--primary);text-decoration:underline" onclick="editarDedicacion(\''+escAttr(d.url)+'\');return false;">Editar</a>' : '';
       return '<tr style="background:'+bg+'">' +
         '<td style="padding:4px 6px;border-bottom:1px solid var(--border);color:var(--text2);white-space:nowrap">'+escHtml(fmtDate(d['date:Fecha:start']))+'</td>' +
         '<td style="padding:4px 6px;border-bottom:1px solid var(--border)">'+escHtml(d.Persona||'—')+'</td>' +
