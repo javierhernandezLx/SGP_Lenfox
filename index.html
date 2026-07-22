@@ -540,7 +540,7 @@ tr.row-drop-below td{border-bottom:3px solid var(--primary);}
     <div class="form-group"><label class="form-label">Email</label><input class="form-control" type="email" id="authEmail" autocomplete="email"></div>
     <div class="form-group"><label class="form-label">Contraseña</label><input class="form-control" type="password" id="authPassword" autocomplete="current-password"></div>
     <div class="feedback" id="fb-auth" style="display:none"></div>
-    <div class="cf-turnstile" id="turnstileWidget" style="margin:4px 0 14px" data-sitekey="0x4AAAAAAD7SXocPG_6I1mpP" data-callback="onTurnstileSuccess" data-expired-callback="onTurnstileExpired" data-error-callback="onTurnstileExpired"></div>
+    <div class="cf-turnstile" id="turnstileWidget" style="margin:4px 0 14px;width:100%" data-sitekey="0x4AAAAAAD7SXocPG_6I1mpP" data-theme="light" data-size="flexible" data-callback="onTurnstileSuccess" data-expired-callback="onTurnstileExpired" data-error-callback="onTurnstileExpired"></div>
     <button class="btn-action btn-blue" id="btnAuthSubmit" onclick="submitAuth()" style="width:100%">Iniciar sesión</button>
     <div class="auth-toggle"><a id="authForgotLink" onclick="forgotPassword();return false;" href="#">¿Has olvidado tu contraseña?</a></div>
   </div>
