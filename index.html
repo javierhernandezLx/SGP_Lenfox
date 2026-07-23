@@ -745,6 +745,11 @@ setTimeout(function(){
 <div class="content" id="mainContentMT" style="display:none">
   <div class="tl-header">
     <div class="section-title" id="taskCountMT">Mis tareas</div>
+    <!-- Botón "Nueva tarea" también en Mis Tareas (a petición explícita de Javi): habilitado para
+         Team Members, no solo PM/Director — #ntProyecto (ver refrescarSelectsProyecto()) ya
+         restringe el desplegable de Proyecto a proyectosDondeParticipo(), así que cada persona
+         solo puede crear tareas en los proyectos donde participa, sea cual sea su rol allí. -->
+    <button class="btn-refresh" id="btnNuevaTareaMT" onclick="openNewTaskModal()" style="background:#16a34a;color:#fff">&#10133; Nueva tarea</button>
   </div>
   <div id="taskListMT"></div>
 </div>
@@ -1924,6 +1929,27 @@ function esPMoDirectorDeProyecto(proyectoUrl){
   });
 }
 
+/* Proyectos donde CURRENT_USER tiene CUALQUIER rol activo (Director, Project Manager o Project
+   Team) en 🔑 SGP — Asignación de Roles — a diferencia de proyectosVisibles() (solo PM/Director),
+   incluye también los proyectos donde la persona participa como Project Team. A petición
+   explícita de Javi: el botón "Nueva tarea" debe habilitarse también a Team Members, pero
+   restringido a los proyectos en los que participan (sea cual sea su rol allí) — ver
+   refrescarSelectsProyecto() (#ntProyecto) y el botón añadido en "Mis Tareas". */
+function proyectosDondeParticipo(){
+  var yo = MAP_USUARIO_POR_NOMBRE[CURRENT_USER];
+  var miUrl = yo && yo.url;
+  if (!miUrl) return [];
+  var nombres = {};
+  allRoles.forEach(function(r){
+    if (r.Activo !== '__YES__') return;
+    if (relFirstUrl(r.Usuario) !== miUrl) return;
+    var pUrl = relFirstUrl(r.Proyecto);
+    var p = pUrl && MAP_PROYECTO_POR_URL[pUrl];
+    if (p && p.Nombre) nombres[p.Nombre] = true;
+  });
+  return Object.keys(nombres);
+}
+
 /* Reconstruye los desplegables de Proyecto que dependen de proyectosVisibles() (es decir, de
    CURRENT_USER). En la publicación web, CURRENT_USER queda fijo para toda la sesión (identidad
    real de Supabase Auth, sin "Actuar como"), así que basta con llamarla una vez desde
@@ -1941,8 +1967,14 @@ function refrescarSelectsProyecto(){
   if (typeof updateMsProyectoBtnLabel === 'function') updateMsProyectoBtnLabel();
   if (typeof updateBtnExportarVisibility === 'function') updateBtnExportarVisibility();
 
+  /* #ntProyecto (Nueva tarea) usa proyectosDondeParticipo(), no nombresProy/proyectosVisibles():
+     a petición explícita de Javi, cualquier persona (también Team Member) debe poder crear
+     tareas, pero solo en los proyectos donde participa — sea cual sea su rol allí. Para PM/
+     Director esta lista ya incluye sus proyectos (proyectosVisibles() es subconjunto de
+     proyectosDondeParticipo()), así que no pierden ningún proyecto respecto a antes. */
+  var nombresProyParticipo = proyectosDondeParticipo().sort(function(a,b){ return a.localeCompare(b,'es'); });
   var ntProy = document.getElementById('ntProyecto');
-  if (ntProy) ntProy.innerHTML = '<option value="">— selecciona —</option>' + nombresProy.map(function(n){ return '<option>'+escHtml(n)+'</option>'; }).join('');
+  if (ntProy) ntProy.innerHTML = '<option value="">— selecciona —</option>' + nombresProyParticipo.map(function(n){ return '<option>'+escHtml(n)+'</option>'; }).join('');
 
   var beProy = document.getElementById('beProyecto');
   if (beProy) beProy.innerHTML = '<option value="">— no cambiar —</option>' + nombresProy.map(function(n){ return '<option>'+escHtml(n)+'</option>'; }).join('');
@@ -2119,19 +2151,11 @@ async function loadUsuariosYProyectos() {
   poblarFiltrosProyectoPersona();
 }
 
-/* Obtiene el Código autonumérico de una tarea leyéndola DIRECTAMENTE por su id (Supabase), en vez
-   de buscarla en la lista general (que puede venir de una copia en caché de una consulta
-   anterior). Cada id de tarea es único, así que esta lectura puntual nunca puede ser una copia en
-   caché de otra tarea distinta. */
-async function obtenerCodigoTarea(url){
-  try {
-    var res = await sb.from('tareas').select('codigo').eq('id', url);
-    var rows = res.data;
-    return (rows && rows[0] && rows[0].codigo != null) ? Number(rows[0].codigo) : null;
-  } catch(e) { return null; }
-}
+/* obtenerCodigoTarea() se retira (a petición explícita de Javi, fix del bug de "Copiar subtareas"
+   — ver la nota en copiarSubtareasDe()): crearTarea() ya conoce el uuid real de la tarea recién
+   creada desde su propio INSERT, así que no hace falta volver a resolverlo por código. */
 
-/* Operación inversa a obtenerCodigoTarea: resuelve el Código numérico de una tarea padre (tal y
+/* Resuelve el Código numérico de una tarea padre (tal y
    como lo introduce el usuario en el campo "Tarea padre (código)") al uuid real de tareas.id que
    espera la columna tarea_padre_id en Supabase. Busca en allTasksRaw (todas las tareas cargadas,
    no solo las visibles en "Mis Proyectos") para que funcione también con tareas de proyectos
@@ -2267,17 +2291,26 @@ function copiarTareaActual(){
 }
 
 /* Copia todas las subtareas directas de origenCodigo, dejando como Tarea padre la nueva tarea
-   copiada (nuevoPadreCodigo, resuelto a uuid con idTareaPorCodigo). Mismo criterio de nombre
-   ("Copiada de Tarea {código}..."), sin copiar comentarios ni dedicaciones.
+   copiada (nuevoPadreId: uuid real, pasado directamente por crearTarea() — ver nota más abajo
+   sobre el bug corregido). Mismo criterio de nombre ("Copiada de Tarea {código}..."), sin copiar
+   comentarios ni dedicaciones.
    Crea TODAS las subtareas en un único INSERT multi-fila (mismo espíritu que la versión Notion,
    que las creaba en una sola llamada a notion-create-pages) y TODOS sus comentarios de auditoría
    en otro único INSERT — en vez de uno por subtarea. proyecto_id/asignado_a_id/sprint_id se
    resuelven aquí desde los Nombres/código ya resueltos que trae cada `s` (ver loadData()). */
-async function copiarSubtareasDe(origenCodigo, nuevoPadreCodigo){
+async function copiarSubtareasDe(origenCodigo, nuevoPadreId){
+  /* BUG corregido (a petición explícita de Javi, reportado 2026-07-23: "no copia las subtareas"):
+     antes esta función recibía el CÓDIGO de la tarea recién creada y resolvía su uuid con
+     idTareaPorCodigo(), que busca en allTasksRaw — la caché local ANTES de recargar. Como
+     crearTarea() llama a copiarSubtareasDe() antes de su await loadData() final, la tarea recién
+     creada todavía no existía en allTasksRaw, así que idTareaPorCodigo() devolvía null y todas
+     las "subtareas copiadas" se creaban con tarea_padre_id = null (huérfanas, no colgando de la
+     nueva tarea) — encontradas/creadas salían con número > 0 en el toast, pero no aparecían como
+     hijas de nada. Ahora se recibe directamente el uuid real (ya lo tiene crearTarea() desde el
+     INSERT de la tarea principal), sin pasar por ningún lookup en caché. */
   var subtareas = allTasks.filter(function(x){ return String(x['Tarea padre']) === String(origenCodigo); });
   if (!subtareas.length) return { encontradas: 0, creadas: 0, fallidas: [] };
 
-  var nuevoPadreId = idTareaPorCodigo(nuevoPadreCodigo);
   var ahora = new Date().toISOString();
   var filasValores = subtareas.map(function(s){
     var estInicialSub = (s['Estimacion h']!=null && s['Estimacion h']!=='') ? s['Estimacion h'] : (s.Talla ? TALLA_HORAS[s.Talla] : null);
@@ -2400,24 +2433,18 @@ async function crearTarea(btn){
   var t = null;
   var subInfo = { encontradas: 0, creadas: 0, fallidas: [] };
   var errorPostCreacion = '';
-  var subEstado = 'no-pedido'; /* 'no-pedido' | 'sin-origen' | 'sin-tarea' | 'hecho' — para diagnosticar exactamente por qué no se copian subtareas si vuelve a fallar */
+  var subEstado = 'no-pedido'; /* 'no-pedido' | 'sin-origen' | 'hecho' — para diagnosticar exactamente por qué no se copian subtareas si vuelve a fallar */
   try {
     if (copiarSubtareas) {
       if (!origenCodigoCopia) {
         subEstado = 'sin-origen';
       } else {
-        /* Se obtiene el Código de la tarea recién creada leyéndola directamente por su URL
-           (notion-fetch), no buscándola en la lista general recargada — esa lista puede venir de
-           una copia en caché de una consulta anterior y no reflejar la tarea recién creada. */
-        btn.textContent = 'Obteniendo código de la tarea…';
-        var nuevoPadreCodigo = url ? await obtenerCodigoTarea(url) : null;
-        if (nuevoPadreCodigo == null) {
-          subEstado = 'sin-tarea';
-        } else {
-          btn.textContent = 'Copiando subtareas…';
-          subInfo = await copiarSubtareasDe(origenCodigoCopia, nuevoPadreCodigo);
-          subEstado = 'hecho';
-        }
+        /* uuid del nuevo padre = url, ya conocido desde el INSERT de la tarea principal (Paso 1)
+           — no hace falta volver a resolverlo por código (ver nota en copiarSubtareasDe() sobre
+           el bug que eso causaba). */
+        btn.textContent = 'Copiando subtareas…';
+        subInfo = await copiarSubtareasDe(origenCodigoCopia, url);
+        subEstado = 'hecho';
       }
     }
     await loadData();
@@ -2438,9 +2465,7 @@ async function crearTarea(btn){
     if (subEstado === 'sin-origen') {
       msg += ' · ⚠ Se pidió copiar subtareas pero no se registró la tarea origen (vuelve a intentarlo abriendo "Copiar" de nuevo)';
       esError = true;
-    } else if (subEstado === 'sin-tarea') {
-      msg += ' · ⚠ No se pudo localizar la tarea recién creada para copiar sus subtareas';
-      esError = true;    } else if (subEstado === 'hecho') {
+    } else if (subEstado === 'hecho') {
       if (subInfo.encontradas === 0) {
         msg += ' · No se encontró ninguna subtarea de la Nº '+origenCodigoCopia+' que copiar';
       } else if (subInfo.creadas) {
@@ -3567,7 +3592,9 @@ async function loadAllComments(){
   allTasksRaw.forEach(function(t){
     (commentCache[t.url] || []).forEach(function(c){
       if (c.menciones.indexOf(CURRENT_USER) !== -1) {
-        allMentions.push({ taskUrl: t.url, taskName: t.Nombre || '—', comment: c });
+        /* taskProyecto (a petición explícita de Javi): el panel de Menciones debe mostrar también
+           el proyecto de la tarea mencionada, no solo su nombre — ver renderMencionesPnl(). */
+        allMentions.push({ taskUrl: t.url, taskName: t.Nombre || '—', taskProyecto: t.Proyecto || '', comment: c });
       }
     });
   });
@@ -6097,7 +6124,7 @@ async function auditComment(taskUrl, text, menciones, isSystem){
     menciones.forEach(function(m){
       if (m !== CURRENT_USER) {
         var tRef = allTasksRaw.find(function(x){ return x.url === taskUrl; });
-        allMentions.push({ taskUrl: taskUrl, taskName: (tRef && tRef.Nombre) || '—', comment: entry });
+        allMentions.push({ taskUrl: taskUrl, taskName: (tRef && tRef.Nombre) || '—', taskProyecto: (tRef && tRef.Proyecto) || '', comment: entry });
       }
     });
     updateUnreadBadge();
@@ -6459,7 +6486,7 @@ function renderMencionesPnl(){
     var c = m.comment;
     var dateStr = c.date ? fmtDateTime(c.date) : '';
     return '<div class="mention-item" id="mitem-'+i+'">' +
-      '<div class="mention-task">&#128203; '+escHtml(m.taskName||'—')+'</div>' +
+      '<div class="mention-task">&#128203; '+escHtml(m.taskName||'—')+(m.taskProyecto ? ' &middot; &#128193; '+escHtml(m.taskProyecto) : '')+'</div>' +
       '<div class="mention-text">'+linkifyAndMention(c.text||'')+'</div>' +
       '<div class="mention-meta">'+escHtml(c.author||'')+(dateStr?' &middot; '+escHtml(dateStr):'')+'</div>' +
       '<div class="mention-actions">' +
