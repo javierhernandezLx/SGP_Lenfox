@@ -1677,6 +1677,7 @@ var CURRENT_USER  = null; /* Nombre real, resuelto por email de Supabase Auth en
 var CURRENT_USER_ID = null; /* uuid en usuarios.id de CURRENT_USER, fijado en iniciarPanel() */
 var CURRENT_USER_EMAIL = null; /* email de la sesión de Supabase Auth, fijado en iniciarPanel() */
 var CURRENT_USER_ADMIN = false; /* usuarios.administrador de CURRENT_USER — gobierna el conmutador REQ-10⇄REQ-17 (ver actualizarSwitcherAdmin()) */
+var CURRENT_USER_FOTO_URL = ''; /* usuarios.foto_url de CURRENT_USER (a petición de Javi, 2026-07-23) — si está vacío, el avatar de cabecera muestra la inicial del nombre, igual que antes */
 var TEAM_MEMBERS  = ['Javi', 'Juanjo', 'Ana', 'Carlos']; /* valor de arranque; se sobreescribe con nombres reales de usuarios en cuanto carga loadUsuariosYProyectos() */
 var SYS_MARKER    = '⚙SYS⚙ '; /* marca invisible en el texto para distinguir comentarios automáticos de cambios de propiedades */
 var TALLA_HORAS   = { XS:3, S:7, M:13, L:24, XL:50 };
@@ -6318,7 +6319,7 @@ async function resolverIdentidadPorEmail(email){
     var res = await sb.from('usuarios').select('*').eq('email', email).limit(1);
     if (res.error || !res.data || !res.data[0]) return null;
     var u = res.data[0];
-    return { url: u.id, Nombre: u.nombre, Email: u.email, Administrador: !!u.administrador, Bloqueado: !!u.bloqueado };
+    return { url: u.id, Nombre: u.nombre, Email: u.email, Administrador: !!u.administrador, Bloqueado: !!u.bloqueado, FotoUrl: u.foto_url || '' };
   } catch(e) { return null; }
 }
 
@@ -6361,6 +6362,7 @@ async function iniciarPanel(){
   CURRENT_USER_ID = yo.url;
   CURRENT_USER_EMAIL = yo.Email;
   CURRENT_USER_ADMIN = yo.Administrador;
+  CURRENT_USER_FOTO_URL = yo.FotoUrl || '';
 
   if (yo.Bloqueado) {
     mostrarPantallaBloqueo(ICONO_BLOQUEADA, 'Cuenta bloqueada',
@@ -6383,7 +6385,11 @@ async function iniciarPanel(){
   var greetEl = document.getElementById('hdrGreeting');
   if (greetEl) greetEl.textContent = 'Hola, ' + CURRENT_USER;
   var avatarEl = document.getElementById('hdrAvatar');
-  if (avatarEl) avatarEl.textContent = CURRENT_USER.charAt(0).toUpperCase();
+  if (avatarEl) {
+    avatarEl.innerHTML = CURRENT_USER_FOTO_URL
+      ? '<img src="'+escHtml(CURRENT_USER_FOTO_URL)+'" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">'
+      : escHtml(CURRENT_USER.charAt(0).toUpperCase());
+  }
   var emailEl = document.getElementById('hdrUserEmail');
   if (emailEl) emailEl.textContent = CURRENT_USER_EMAIL || '';
   actualizarSwitcherAdmin();

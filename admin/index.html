@@ -545,6 +545,15 @@ dialog.modal::backdrop{background:rgba(0,0,0,.52);backdrop-filter:blur(3px);}
   <div class="modal-hdr"><h2 id="userModalTitle">Nuevo usuario</h2>
     <button class="modal-close" onclick="closeModal('userModal')">&#10005;</button></div>
   <div class="modal-body">
+    <div class="form-group" style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+      <div class="user-av" id="uFotoPreview" style="width:64px;height:64px;font-size:20px;overflow:hidden">?</div>
+      <div>
+        <input type="file" id="uFotoInput" accept="image/png,image/jpeg,image/webp" style="display:none" onchange="onAvatarFileChange(this)">
+        <button type="button" class="btn-action" style="width:auto;padding:5px 12px;font-size:11.5px;background:var(--surface2);color:var(--text2)" onclick="document.getElementById('uFotoInput').click()">&#128247; Subir foto</button>
+        <button type="button" class="btn-action" id="btnQuitarFoto" style="width:auto;padding:5px 12px;font-size:11.5px;background:var(--surface2);color:var(--text2);display:none" onclick="quitarFotoUsuario()">Quitar foto</button>
+        <div class="hint" style="margin-top:4px">JPG, PNG o WebP, máx. 2&nbsp;MB. Si no hay foto se muestran las iniciales.</div>
+      </div>
+    </div>
     <div class="two-col">
       <div class="form-group"><label class="form-label">Nombre *</label><input class="form-control" type="text" id="uNombre"></div>
       <div class="form-group"><label class="form-label">Apellidos</label><input class="form-control" type="text" id="uApellidos"></div>
@@ -892,13 +901,14 @@ async function toggleMaintenance(){
    cambian ni una línea.
 ══════════════════════════════════════════ */
 async function loadUsuariosRows(){
-  var { data: rows, error } = await sb.from('usuarios').select('id,nombre,apellidos,email,administrador,bloqueado');
+  var { data: rows, error } = await sb.from('usuarios').select('id,nombre,apellidos,email,administrador,bloqueado,foto_url');
   if (error) throw new Error(error.message);
   return rows.map(function(r){
     return {
       url: r.id, Nombre: r.nombre, Apellidos: r.apellidos, Email: r.email,
       Administrador: r.administrador ? '__YES__' : '__NO__',
-      Bloqueado: r.bloqueado ? '__YES__' : '__NO__'
+      Bloqueado: r.bloqueado ? '__YES__' : '__NO__',
+      FotoUrl: r.foto_url || ''
     };
   });
 }
@@ -1038,6 +1048,16 @@ async function loadAll(){
 /* ══════════════════════════════════════════
    USUARIOS — LISTA
 ══════════════════════════════════════════ */
+/* Iniciales para el avatar cuando el usuario no tiene foto (fallback, comportamiento previo). */
+function avatarInitials(nombre, apellidos){
+  return (((nombre||'?')[0]||'?') + (apellidos?apellidos[0]:'')).toUpperCase();
+}
+/* Contenido del avatar (img si hay foto, iniciales si no) — reutilizado en la lista y en el
+   modal de edición. */
+function avatarContentHtml(fotoUrl, nombre, apellidos){
+  if (fotoUrl) return '<img src="'+esc(fotoUrl)+'" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+  return esc(avatarInitials(nombre, apellidos));
+}
 function renderUsuarios(){
   var search = (document.getElementById('userSearch').value || '').toLowerCase();
   var list = allUsuarios.filter(function(u){
@@ -1047,18 +1067,23 @@ function renderUsuarios(){
   var el = document.getElementById('usersList');
   if (!list.length){ el.innerHTML = '<div class="empty-msg">No hay usuarios' + (search?' que coincidan con la búsqueda':' todavía. Crea el primero con "+ Nuevo usuario"') + '.</div>'; return; }
   el.innerHTML = list.map(function(u){
-    var initials = ((u.Nombre||'?')[0] + (u.Apellidos?u.Apellidos[0]:'')).toUpperCase();
     var badges = '';
     if (u.Administrador === '__YES__') badges += '<span class="badge badge-admin">Administrador</span>';
     if (u.Bloqueado === '__YES__') badges += '<span class="badge badge-blocked">Bloqueado</span>';
     return '<div class="user-row" onclick="openUserModal('+jsArg(u.url)+')">' +
-      '<div class="user-av">'+esc(initials)+'</div>' +
+      '<div class="user-av">'+avatarContentHtml(u.FotoUrl, u.Nombre, u.Apellidos)+'</div>' +
       '<div class="user-info"><div class="user-name">'+esc(u.Nombre)+' '+esc(u.Apellidos||'')+badges+'</div>' +
       '<div class="user-email">'+esc(u.Email||'')+'</div></div>' +
       '</div>';
   }).join('');
 }
 
+/* Estado de la foto pendiente de subir/quitar en el modal de usuario (a petición explícita de
+   Javi, 2026-07-23): _avatarFile es el File elegido en <input type=file> (o null si no se ha
+   tocado); _avatarRemoved es true si se pulsó "Quitar foto" explícitamente (para poder borrar
+   una foto existente sin subir una nueva). Se leen desde saveUser() al confirmar. */
+var _avatarFile = null;
+var _avatarRemoved = false;
 function openUserModal(url){
   editingUserUrl = url;
   var u = url ? allUsuarios.find(function(x){ return x.url === url; }) : null;
@@ -1068,9 +1093,56 @@ function openUserModal(url){
   document.getElementById('uEmail').value = u ? (u.Email||'') : '';
   document.getElementById('uAdmin').checked = u ? (u.Administrador === '__YES__') : false;
   document.getElementById('uBloqueado').checked = u ? (u.Bloqueado === '__YES__') : false;
+  _avatarFile = null;
+  _avatarRemoved = false;
+  document.getElementById('uFotoInput').value = '';
+  document.getElementById('uFotoPreview').innerHTML = avatarContentHtml(u ? u.FotoUrl : '', u ? u.Nombre : '', u ? u.Apellidos : '');
+  document.getElementById('btnQuitarFoto').style.display = (u && u.FotoUrl) ? '' : 'none';
   document.getElementById('userFeedback').style.display = 'none';
   var dlg = document.getElementById('userModal');
   if (!dlg.open) dlg.showModal();
+}
+function onAvatarFileChange(input){
+  var file = input.files && input.files[0];
+  if (!file) return;
+  if (!/^image\/(png|jpeg|webp)$/.test(file.type)){ showFeedback('userFeedback', false, 'La foto debe ser JPG, PNG o WebP.'); input.value=''; return; }
+  if (file.size > 2*1024*1024){ showFeedback('userFeedback', false, 'La foto no puede superar 2 MB.'); input.value=''; return; }
+  _avatarFile = file;
+  _avatarRemoved = false;
+  var reader = new FileReader();
+  reader.onload = function(e){
+    document.getElementById('uFotoPreview').innerHTML = '<img src="'+e.target.result+'" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+    document.getElementById('btnQuitarFoto').style.display = '';
+  };
+  reader.readAsDataURL(file);
+}
+function quitarFotoUsuario(){
+  _avatarFile = null;
+  _avatarRemoved = true;
+  document.getElementById('uFotoInput').value = '';
+  document.getElementById('uFotoPreview').innerHTML = avatarContentHtml('', document.getElementById('uNombre').value, document.getElementById('uApellidos').value);
+  document.getElementById('btnQuitarFoto').style.display = 'none';
+}
+/* Sube (o borra) la foto pendiente para el usuario userId, y devuelve la nueva foto_url a
+   guardar en la fila ('' para dejarla vacía, undefined si no hay cambio de foto que aplicar).
+   Se usa un único path fijo por usuario (su propio id, sin extensión) para que "Quitar foto" y
+   sucesivas subidas siempre sobrescriban el mismo objeto (upsert:true) en vez de acumular
+   archivos huérfanos en el bucket si cambia el formato de la imagen entre subidas. El
+   Content-Type correcto se manda aparte en las opciones de upload(), así que el path no necesita
+   extensión para servirse bien. Se añade ?v=timestamp a la URL guardada para evitar que quede
+   cacheada la imagen anterior tras reemplazarla (el path es siempre el mismo). */
+async function subirOQuitarFotoUsuario(userId){
+  if (_avatarFile){
+    var up = await sb.storage.from('avatares').upload(userId, _avatarFile, { upsert: true, contentType: _avatarFile.type });
+    if (up.error) throw up.error;
+    var pub = sb.storage.from('avatares').getPublicUrl(userId);
+    return pub.data.publicUrl + '?v=' + Date.now();
+  }
+  if (_avatarRemoved){
+    try { await sb.storage.from('avatares').remove([userId]); } catch(e){ /* best-effort: si falla el borrado del archivo, igualmente se limpia foto_url */ }
+    return '';
+  }
+  return undefined;
 }
 
 async function saveUser(){
@@ -1095,6 +1167,7 @@ async function saveUser(){
       'Administrador': admin ? '__YES__' : '__NO__',
       'Bloqueado': bloqueado ? '__YES__' : '__NO__'
     };
+    var userId = editingUserUrl;
     if (editingUserUrl){
       await sqlUpdate('usuarios', editingUserUrl, {
         nombre: props['Nombre'], apellidos: props['Apellidos'], email: props['Email'],
@@ -1110,7 +1183,24 @@ async function saveUser(){
         administrador: props['Administrador'] === '__YES__',
         bloqueado: props['Bloqueado'] === '__YES__'
       });
+      userId = newUserId;
       allUsuarios.push(Object.assign({ url: newUserId }, props));
+    }
+    /* Foto de perfil (a petición explícita de Javi, 2026-07-23): se sube/borra DESPUÉS de tener
+       userId (necesario tanto en alta como en edición, ya que el path del archivo es el propio
+       id de usuario). Si falla la subida no se revierte el guardado del resto de campos — el
+       aviso se acumula en fotoWarning y se añade al mensaje final en vez de mostrarse aparte,
+       para que no lo pise el showFeedback de éxito que viene justo después. */
+    var fotoWarning = '';
+    try {
+      var nuevaFotoUrl = await subirOQuitarFotoUsuario(userId);
+      if (nuevaFotoUrl !== undefined){
+        await sqlUpdate('usuarios', userId, { foto_url: nuevaFotoUrl || null });
+        var uConFoto = allUsuarios.find(function(u){ return u.url === userId; });
+        if (uConFoto) uConFoto.FotoUrl = nuevaFotoUrl;
+      }
+    } catch(fotoErr){
+      fotoWarning = ' La foto no se pudo subir (' + (fotoErr.message||'error desconocido') + ') — puedes reintentarlo editando el usuario.';
     }
     allUsuarios.sort(function(a,b){ return (a.Nombre||'').localeCompare(b.Nombre||''); });
     renderUsuarios();
@@ -1123,14 +1213,16 @@ async function saveUser(){
         var inviteRes = await sb.functions.invoke('invite-user', { body: { email: email, nombre: nombre } });
         if (inviteRes.error) throw inviteRes.error;
         if (inviteRes.data && inviteRes.data.error) throw new Error(inviteRes.data.error);
-        showFeedback('userFeedback', true, 'Usuario guardado. Invitación enviada a ' + email + '.');
+        showFeedback('userFeedback', true, 'Usuario guardado. Invitación enviada a ' + email + '.' + fotoWarning);
       } catch(inviteErr){
-        showFeedback('userFeedback', true, 'Usuario guardado, pero la invitación por email falló (' + (inviteErr.message || 'error desconocido') + '). Puedes reenviarla luego, o pedirle a la persona que use "He olvidado mi contraseña" con este email una vez tenga cuenta.');
+        showFeedback('userFeedback', true, 'Usuario guardado, pero la invitación por email falló (' + (inviteErr.message || 'error desconocido') + '). Puedes reenviarla luego, o pedirle a la persona que use "He olvidado mi contraseña" con este email una vez tenga cuenta.' + fotoWarning);
       }
     } else {
-      showFeedback('userFeedback', true, 'Usuario guardado correctamente.');
+      showFeedback('userFeedback', true, 'Usuario guardado correctamente.' + fotoWarning);
     }
-    setTimeout(function(){ document.getElementById('userModal').close(); }, editingUserUrl ? 500 : 1800);
+    /* Si hubo aviso de foto, no se cierra solo: Javi necesita tiempo de leerlo y decidir si
+       reintenta ahora mismo (el usuario y el resto de campos ya han quedado guardados igual). */
+    if (!fotoWarning) setTimeout(function(){ document.getElementById('userModal').close(); }, editingUserUrl ? 500 : 1800);
   } catch(e){
     showFeedback('userFeedback', false, 'Error al guardar: ' + e.message);
   } finally {
@@ -1193,13 +1285,25 @@ function toggleContratoCollapse(contratoUrl){
    sin hijos (o con hijos que no aplica plegar) queden alineadas con las que sí tienen chevron. */
 var TREE_TOGGLE_PLACEHOLDER = '<span class="tree-toggle" style="visibility:hidden">&#9660;</span>';
 function relUrls(row, prop){ try { return JSON.parse(row[prop] || '[]'); } catch(e){ return []; } }
-/* Contratos cuyo Proyecto padre (de tipo Ejecución) es projectUrl. */
-function contratosDeProyecto(projectUrl){
-  return allContratos.filter(function(ct){ return relUrls(ct, 'Proyecto').indexOf(projectUrl) !== -1; });
+/* Orden ascendente por Fecha inicio (a petición explícita de Javi, 2026-07-23): las filas sin
+   fecha de inicio se dejan al final, no se mezclan al principio ni se rompe el resto del orden. */
+function ordenarPorFechaInicioAsc(rows){
+  return rows.slice().sort(function(a,b){
+    var da = a['date:Fecha inicio:start'] || '';
+    var db = b['date:Fecha inicio:start'] || '';
+    if (!da && !db) return 0;
+    if (!da) return 1;
+    if (!db) return -1;
+    return da < db ? -1 : (da > db ? 1 : 0);
+  });
 }
-/* Proyectos (Gestión/Preventa) que cuelgan de un contrato concreto. */
+/* Contratos cuyo Proyecto padre (de tipo Ejecución) es projectUrl, ordenados por Fecha inicio asc. */
+function contratosDeProyecto(projectUrl){
+  return ordenarPorFechaInicioAsc(allContratos.filter(function(ct){ return relUrls(ct, 'Proyecto').indexOf(projectUrl) !== -1; }));
+}
+/* Proyectos (Gestión/Preventa) que cuelgan de un contrato concreto, ordenados por Fecha inicio asc. */
 function proyectosDeContrato(contratoUrl){
-  return allProyectos.filter(function(p){ return relUrls(p, 'Contrato').indexOf(contratoUrl) !== -1; });
+  return ordenarPorFechaInicioAsc(allProyectos.filter(function(p){ return relUrls(p, 'Contrato').indexOf(contratoUrl) !== -1; }));
 }
 /* Fila de un proyecto (nombre, tipo, estado, equipo, fechas, roles) — reutilizada en los
    distintos niveles del árbol: proyectos de tipo Ejecución (nivel 2) y proyectos de tipo
