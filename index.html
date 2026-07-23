@@ -770,10 +770,16 @@ setTimeout(function(){
   </div>
   <div class="filter-group">
     <label>Sprint</label>
-    <select id="fSprint" onchange="renderTableReset()">
-      <option value="">Todos</option>
-      <option>S27-2026</option><option>S28-2026</option><option>S29-2026</option><option>S30-2026</option>
-    </select>
+    <div class="ms-wrap" id="msSprintWrap">
+      <button type="button" class="ms-btn" id="msSprintBtn" onclick="toggleMsSprint(event)">Todos</button>
+      <div class="ms-menu" id="msSprintMenu">
+        <div id="msSprintItems"><!-- poblado dinámicamente por poblarSelectsSprint() --></div>
+        <div class="ms-actions">
+          <button type="button" onclick="msSprintSelectAll()">Todos</button>
+          <button type="button" onclick="msSprintClear()">Ninguno</button>
+        </div>
+      </div>
+    </div>
   </div>
   <div class="filter-group">
     <label>Estado</label>
@@ -798,17 +804,36 @@ setTimeout(function(){
   </div>
   <div class="filter-group">
     <label>Tipo de tarea</label>
-    <select id="fTipoTarea" onchange="renderTableReset()">
-      <option value="">Todos</option>
-      <option>1. Cuenta de control</option><option>2. Paquete de trabajo</option><option>3. Épica</option>
-      <option>4. Funcionalidad</option><option>5. Historia de usuario</option><option>6. Tarea</option>
-    </select>
+    <div class="ms-wrap" id="msTipoWrap">
+      <button type="button" class="ms-btn" id="msTipoBtn" onclick="toggleMsTipo(event)">Todos</button>
+      <div class="ms-menu" id="msTipoMenu">
+        <div id="msTipoItems">
+          <label class="ms-item"><input type="checkbox" class="ms-tipo-chk" value="1. Cuenta de control" onchange="onMsTipoChange()"> 1. Cuenta de control</label>
+          <label class="ms-item"><input type="checkbox" class="ms-tipo-chk" value="2. Paquete de trabajo" onchange="onMsTipoChange()"> 2. Paquete de trabajo</label>
+          <label class="ms-item"><input type="checkbox" class="ms-tipo-chk" value="3. Épica" onchange="onMsTipoChange()"> 3. Épica</label>
+          <label class="ms-item"><input type="checkbox" class="ms-tipo-chk" value="4. Funcionalidad" onchange="onMsTipoChange()"> 4. Funcionalidad</label>
+          <label class="ms-item"><input type="checkbox" class="ms-tipo-chk" value="5. Historia de usuario" onchange="onMsTipoChange()"> 5. Historia de usuario</label>
+          <label class="ms-item"><input type="checkbox" class="ms-tipo-chk" value="6. Tarea" onchange="onMsTipoChange()"> 6. Tarea</label>
+        </div>
+        <div class="ms-actions">
+          <button type="button" onclick="msTipoSelectAll()">Todos</button>
+          <button type="button" onclick="msTipoClear()">Ninguno</button>
+        </div>
+      </div>
+    </div>
   </div>
   <div class="filter-group">
     <label>Asignado a</label>
-    <select id="fAsignado" onchange="renderTableReset()">
-      <option value="">Todos</option>
-    </select>
+    <div class="ms-wrap" id="msAsignadoWrap">
+      <button type="button" class="ms-btn" id="msAsignadoBtn" onclick="toggleMsAsignado(event)">Todos</button>
+      <div class="ms-menu" id="msAsignadoMenu">
+        <div id="msAsignadoItems"><!-- poblado dinámicamente desde 👤 SGP — Usuarios --></div>
+        <div class="ms-actions">
+          <button type="button" onclick="msAsignadoSelectAll()">Todos</button>
+          <button type="button" onclick="msAsignadoClear()">Ninguno</button>
+        </div>
+      </div>
+    </div>
   </div>
   <button class="btn-clear" onclick="clearFilters()">Limpiar filtros</button>
 </div>
@@ -1767,6 +1792,7 @@ var activeStatus = null;
 var commentCache = {};
 var allMentions  = [];    // [{taskUrl, taskName, comment}] — menciones a CURRENT_USER
 var _mentionItems = [];   // snapshot renderizado del panel de menciones
+var _modalOpenedFromMentionUrl = null; // commentUrl de la mención de la que se abrió #taskModal (ver openTaskModal/viewMentionTask), null si no aplica
 var darkMode = false;
 
 /* Rosco "Tareas por proyecto" de "Mis Tareas" (CC-035, a petición explícita de Javi). */
@@ -1935,8 +1961,13 @@ function poblarFiltrosProyectoPersona(){
   if (_filtrosPersonaProyectoPoblados) return;
   var nombresUsu = allUsuarios.map(function(u){ return u.Nombre; }).filter(Boolean).sort(function(a,b){ return a.localeCompare(b,'es'); });
 
-  var fAsig = document.getElementById('fAsignado');
-  if (fAsig) fAsig.innerHTML = '<option value="">Todos</option>' + nombresUsu.map(function(n){ return '<option>'+escHtml(n)+'</option>'; }).join('');
+  var msAsigItems = document.getElementById('msAsignadoItems');
+  if (msAsigItems) {
+    msAsigItems.innerHTML = nombresUsu.map(function(n){
+      return '<label class="ms-item"><input type="checkbox" class="ms-asignado-chk" value="'+escAttr(n)+'" onchange="onMsAsignadoChange()"> '+escHtml(n)+'</label>';
+    }).join('');
+    updateMsAsignadoBtnLabel();
+  }
 
   var ntAsig = document.getElementById('ntAsignado');
   if (ntAsig) ntAsig.innerHTML = '<option value="">— sin asignar —</option>' + nombresUsu.map(function(n){ return '<option>'+escHtml(n)+'</option>'; }).join('');
@@ -2350,7 +2381,11 @@ async function crearTarea(btn){
     var nueva = await sqlInsert('tareas', props);
     if (!nueva || !nueva.id) throw new Error('No se pudo crear la tarea');
     url = nueva.id;
-    await auditComment(url, 'Tarea creada por '+CURRENT_USER+' · '+new Date().toLocaleString('es-ES'), [], true);
+    /* Notificación por mención (a petición explícita de Javi): si la tarea nace ya asignada a
+       alguien, ese comentario de sistema debe mencionarla para que le llegue al panel de
+       Menciones — mismo criterio que actualizarPlan()/reasignarTareaSimple()/aplicarEdicionMasiva(). */
+    var menCreacion = asignado ? [asignado] : [];
+    await auditComment(url, 'Tarea creada por '+CURRENT_USER+(asignado ? ' · Asignada a @'+asignado : '')+' · '+new Date().toLocaleString('es-ES'), menCreacion, true);
     closeNewTaskModal();
   } catch(e) {
     showToast('✗ Error al crear la tarea: '+e.message, 'err');
@@ -2554,8 +2589,12 @@ function setSprintInfoDisplay(codigo){
 }
 function poblarSelectsSprint(){
   var opts = allSprints.map(function(s){ return '<option value="'+escHtml(s.codigo)+'">'+sprintOptionLabel(s)+'</option>'; }).join('');
-  var fSprint = document.getElementById('fSprint');
-  if (fSprint) fSprint.innerHTML = '<option value="">Todos</option>' + opts;
+  var msSprintItems = document.getElementById('msSprintItems');
+  if (msSprintItems) {
+    msSprintItems.innerHTML = allSprints.map(function(s){
+      return '<label class="ms-item"><input type="checkbox" class="ms-sprint-chk" value="'+escAttr(s.codigo)+'" onchange="onMsSprintChange()"> '+sprintOptionLabel(s)+'</label>';
+    }).join('');
+  }
   var pSprint = document.getElementById('pSprint');
   if (pSprint) pSprint.innerHTML = '<option value="__CLEAR__">(sin sprint)</option>' + opts;
   var ntSprint = document.getElementById('ntSprint');
@@ -2572,9 +2611,12 @@ function poblarSelectsSprint(){
      que antes (ver _selectsSprintPoblados). */
   if (!_selectsSprintPoblados) {
     var actual = sprintActualPorFecha();
-    if (actual && fSprint) fSprint.value = actual.codigo;
+    if (actual) {
+      document.querySelectorAll('.ms-sprint-chk').forEach(function(chk){ if (chk.value === actual.codigo) chk.checked = true; });
+    }
     if (actual && fSprintMT) fSprintMT.value = actual.codigo;
   }
+  updateMsSprintBtnLabel();
   _selectsSprintPoblados = true;
 }
 
@@ -2700,6 +2742,91 @@ function msEstadoSelectAll(){
 function msEstadoClear(){
   document.querySelectorAll('.ms-estado-chk').forEach(function(chk){ chk.checked = false; });
   onMsEstadoChange();
+}
+
+/* Filtros de Sprint, Tipo de tarea y Asignado a por varios valores a la vez (a petición explícita
+   de Javi), mismo patrón ms-wrap/ms-menu que Proyecto/Estado. */
+function toggleMsSprint(e){
+  e.stopPropagation();
+  document.getElementById('msSprintMenu').classList.toggle('open');
+}
+function getSprintsSel(){
+  return Array.prototype.map.call(document.querySelectorAll('.ms-sprint-chk:checked'), function(chk){ return chk.value; });
+}
+function updateMsSprintBtnLabel(){
+  var sel = getSprintsSel();
+  var btn = document.getElementById('msSprintBtn');
+  if (!sel.length) btn.textContent = 'Todos';
+  else if (sel.length === 1) btn.textContent = sel[0];
+  else btn.textContent = sel.length + ' sprints';
+}
+function onMsSprintChange(){
+  updateMsSprintBtnLabel();
+  renderTableReset();
+}
+function msSprintSelectAll(){
+  document.querySelectorAll('.ms-sprint-chk').forEach(function(chk){ chk.checked = true; });
+  onMsSprintChange();
+}
+function msSprintClear(){
+  document.querySelectorAll('.ms-sprint-chk').forEach(function(chk){ chk.checked = false; });
+  onMsSprintChange();
+}
+
+function toggleMsTipo(e){
+  e.stopPropagation();
+  document.getElementById('msTipoMenu').classList.toggle('open');
+}
+function getTiposSel(){
+  return Array.prototype.map.call(document.querySelectorAll('.ms-tipo-chk:checked'), function(chk){ return chk.value; });
+}
+function updateMsTipoBtnLabel(){
+  var sel = getTiposSel();
+  var total = document.querySelectorAll('.ms-tipo-chk').length;
+  var btn = document.getElementById('msTipoBtn');
+  if (!sel.length) btn.textContent = 'Todos';
+  else if (sel.length === total) btn.textContent = 'Todos';
+  else if (sel.length === 1) btn.textContent = sel[0];
+  else btn.textContent = sel.length + ' tipos';
+}
+function onMsTipoChange(){
+  updateMsTipoBtnLabel();
+  renderTableReset();
+}
+function msTipoSelectAll(){
+  document.querySelectorAll('.ms-tipo-chk').forEach(function(chk){ chk.checked = true; });
+  onMsTipoChange();
+}
+function msTipoClear(){
+  document.querySelectorAll('.ms-tipo-chk').forEach(function(chk){ chk.checked = false; });
+  onMsTipoChange();
+}
+
+function toggleMsAsignado(e){
+  e.stopPropagation();
+  document.getElementById('msAsignadoMenu').classList.toggle('open');
+}
+function getAsignadosSel(){
+  return Array.prototype.map.call(document.querySelectorAll('.ms-asignado-chk:checked'), function(chk){ return chk.value; });
+}
+function updateMsAsignadoBtnLabel(){
+  var sel = getAsignadosSel();
+  var btn = document.getElementById('msAsignadoBtn');
+  if (!sel.length) btn.textContent = 'Todos';
+  else if (sel.length === 1) btn.textContent = sel[0];
+  else btn.textContent = sel.length + ' personas';
+}
+function onMsAsignadoChange(){
+  updateMsAsignadoBtnLabel();
+  renderTableReset();
+}
+function msAsignadoSelectAll(){
+  document.querySelectorAll('.ms-asignado-chk').forEach(function(chk){ chk.checked = true; });
+  onMsAsignadoChange();
+}
+function msAsignadoClear(){
+  document.querySelectorAll('.ms-asignado-chk').forEach(function(chk){ chk.checked = false; });
+  onMsAsignadoChange();
 }
 
 /* ══════════════════════════════════════════
@@ -3146,9 +3273,9 @@ function capturarEstadoFiltros(){
     mp: {
       proyectos: getProyectosSel(),
       estados: getEstadosSel(),
-      fSprint: document.getElementById('fSprint').value,
-      fTipoTarea: document.getElementById('fTipoTarea').value,
-      fAsignado: document.getElementById('fAsignado').value,
+      sprints: getSprintsSel(),
+      tipos: getTiposSel(),
+      asignados: getAsignadosSel(),
       fSearch: document.getElementById('fSearch').value,
       fSprintCliente: document.getElementById('fSprintCliente').value,
       activeStatus: activeStatus,
@@ -3202,9 +3329,12 @@ function restaurarEstadoFiltros(){
     updateMsProyectoBtnLabel();
     document.querySelectorAll('.ms-estado-chk').forEach(function(chk){ chk.checked = (mp.estados||[]).indexOf(chk.value) !== -1; });
     updateMsEstadoBtnLabel();
-    document.getElementById('fSprint').value = mp.fSprint || '';
-    document.getElementById('fTipoTarea').value = mp.fTipoTarea || '';
-    document.getElementById('fAsignado').value = mp.fAsignado || '';
+    document.querySelectorAll('.ms-sprint-chk').forEach(function(chk){ chk.checked = (mp.sprints||[]).indexOf(chk.value) !== -1; });
+    updateMsSprintBtnLabel();
+    document.querySelectorAll('.ms-tipo-chk').forEach(function(chk){ chk.checked = (mp.tipos||[]).indexOf(chk.value) !== -1; });
+    updateMsTipoBtnLabel();
+    document.querySelectorAll('.ms-asignado-chk').forEach(function(chk){ chk.checked = (mp.asignados||[]).indexOf(chk.value) !== -1; });
+    updateMsAsignadoBtnLabel();
     document.getElementById('fSearch').value = mp.fSearch || '';
     document.getElementById('btnClearSearch').style.display = mp.fSearch ? '' : 'none';
     document.getElementById('fSprintCliente').value = mp.fSprintCliente || '';
@@ -3658,10 +3788,10 @@ function renderMisTareas(){
    Usada para las tarjetas resumen, que deben reflejar estos filtros pero NO el filtro de tarjeta clicada. */
 function getFilteredBase(){
   var proyectos = getProyectosSel();
-  var sprint = document.getElementById('fSprint').value;
+  var sprints = getSprintsSel();
   var estados = getEstadosSel();
-  var tipoTarea = document.getElementById('fTipoTarea').value;
-  var asignado = document.getElementById('fAsignado').value;
+  var tipos = getTiposSel();
+  var asignados = getAsignadosSel();
   var search = (document.getElementById('fSearch').value || '').trim().toLowerCase();
   /* Filtro de Sprint cliente separado de la búsqueda por nombre (a petición explícita de Javi:
      "backlog" no se encontraba bien mezclado con el resto de criterios de la caja de texto de
@@ -3684,9 +3814,9 @@ function getFilteredBase(){
     if (estados.length) { if (estados.indexOf(t.Estado) === -1) return false; }
     else if (t.Estado === 'Eliminada') return false;
     if (proyectos.length && proyectos.indexOf(t.Proyecto) === -1) return false;
-    if (sprint && t.Sprint !== sprint) return false;
-    if (tipoTarea && t['Tipo de tarea'] !== tipoTarea) return false;
-    if (asignado && t['Asignado a'] !== asignado) return false;
+    if (sprints.length && sprints.indexOf(t.Sprint) === -1) return false;
+    if (tipos.length && tipos.indexOf(t['Tipo de tarea']) === -1) return false;
+    if (asignados.length && asignados.indexOf(t['Asignado a']) === -1) return false;
     if (sprintClienteFiltro && (t['Sprint cliente']||'').toLowerCase().indexOf(sprintClienteFiltro) === -1) return false;
     /* Búsqueda por Nombre, o código/descripción de la tarea PADRE (a petición explícita de Javi;
        el Sprint cliente ya tiene su propio cuadro, ver arriba). */
@@ -3754,13 +3884,19 @@ function getFiltered(){
 }
 
 function clearFilters(){
-  ['fSprint','fTipoTarea','fAsignado','fSearch','fSprintCliente'].forEach(function(id){ document.getElementById(id).value=''; });
+  ['fSearch','fSprintCliente'].forEach(function(id){ document.getElementById(id).value=''; });
   document.getElementById('btnClearSearch').style.display = 'none';
   document.getElementById('btnClearSprintCliente').style.display = 'none';
   document.querySelectorAll('.ms-proyecto-chk').forEach(function(chk){ chk.checked = false; });
   updateMsProyectoBtnLabel();
   document.querySelectorAll('.ms-estado-chk').forEach(function(chk){ chk.checked = false; });
   updateMsEstadoBtnLabel();
+  document.querySelectorAll('.ms-sprint-chk').forEach(function(chk){ chk.checked = false; });
+  updateMsSprintBtnLabel();
+  document.querySelectorAll('.ms-tipo-chk').forEach(function(chk){ chk.checked = false; });
+  updateMsTipoBtnLabel();
+  document.querySelectorAll('.ms-asignado-chk').forEach(function(chk){ chk.checked = false; });
+  updateMsAsignadoBtnLabel();
   activeStatus = null;
   currentPage = 1;
   document.querySelectorAll('.sum-card').forEach(function(c){ c.classList.remove('active-filter'); });
@@ -4117,7 +4253,7 @@ async function aplicarEdicionMasiva(btn){
   if (tipoTarea) { camposSql.tipo_tarea = tipoTarea; resumenCambios.push('Tipo de tarea → '+tipoTarea); }
   if (asignado) {
     if (asignado === '__CLEAR__') { camposSql.asignado_a_id = null; resumenCambios.push('Persona asignada → (sin asignar)'); }
-    else { var aid = MAP_USUARIO_POR_NOMBRE[asignado] && MAP_USUARIO_POR_NOMBRE[asignado].url; if (aid) { camposSql.asignado_a_id = aid; resumenCambios.push('Persona asignada → '+asignado); } }
+    else { var aid = MAP_USUARIO_POR_NOMBRE[asignado] && MAP_USUARIO_POR_NOMBRE[asignado].url; if (aid) { camposSql.asignado_a_id = aid; resumenCambios.push('Persona asignada → @'+asignado); } }
   }
   if (tareaPadreQuitar) { camposSql.tarea_padre_id = null; resumenCambios.push('Tarea padre → (sin padre)'); }
   else if (tareaPadre) { camposSql.tarea_padre_id = idTareaPorCodigo(tareaPadre); resumenCambios.push('Tarea padre → '+tareaPadre); }
@@ -4156,8 +4292,21 @@ async function aplicarEdicionMasiva(btn){
       };
     });
     try {
-      var resComBulk = await sb.from('comentarios').insert(filasComentariosBulk);
+      /* .select('id, tarea_id') (a petición explícita de Javi, notificación por mención en
+         edición masiva): si el lote incluye un cambio de "Persona asignada", cada comentario
+         recién creado debe mencionar a esa persona para que le llegue al panel de Menciones —
+         mismo criterio que crearTarea()/actualizarPlan()/reasignarTareaSimple(). Se pide de
+         vuelta el id de cada fila insertada en la MISMA llamada (nunca una petición por tarea,
+         ver nota más arriba sobre por qué este UPDATE/INSERT va en un único lote). */
+      var resComBulk = await sb.from('comentarios').insert(filasComentariosBulk).select('id, tarea_id');
       if (resComBulk.error) throw resComBulk.error;
+      if (asignado && asignado !== '__CLEAR__' && resComBulk.data && resComBulk.data.length) {
+        var aidMencionBulk = MAP_USUARIO_POR_NOMBRE[asignado] && MAP_USUARIO_POR_NOMBRE[asignado].url;
+        if (aidMencionBulk) {
+          var filasMencionBulk = resComBulk.data.map(function(row){ return { comentario_id: row.id, usuario_id: aidMencionBulk }; });
+          try { var resMencBulk = await sb.from('comentarios_menciones').insert(filasMencionBulk); if (resMencBulk.error) throw resMencBulk.error; } catch(e) { /* best-effort */ }
+        }
+      }
     } catch(e) { /* best-effort */ }
   }
 
@@ -4674,7 +4823,14 @@ function renderCapacidadInfo(elId, persona, sprintCode){
 }
 
 function computeBurndown(){
-  var sprintFiltro = document.getElementById('fSprint').value;
+  /* El Burn-Down necesita UN único sprint como horizonte del eje X. Con el filtro de Sprint ya
+     multi-selección (a petición explícita de Javi), solo se toma directamente si hay EXACTAMENTE
+     uno marcado; con ninguno o varios marcados se cae al mismo autodetectado de siempre (sprint
+     actual, o si no hay tareas activas de ese sprint entre las YA filtradas por
+     getFilteredBase() — que sí respeta la selección múltiple — el primero alfabético que sí
+     tenga). */
+  var sprintsFiltro = getSprintsSel();
+  var sprintFiltro = (sprintsFiltro.length === 1) ? sprintsFiltro[0] : '';
 
   /* A petición explícita de Javi (sospechaba del cuadro de búsqueda, pero en realidad faltaban
      también Tipo de tarea y Estado): el Burn-Down reimplementaba su propio subconjunto de filtros
@@ -4866,10 +5022,10 @@ function renderBurndownFull(){
   velLabelEl.style.color = (burndownVelOverride == null && veloAutoExcedida) ? '#dc2626' : 'var(--primary)';
 
   var proyectos = getProyectosSel();
-  var asignado = document.getElementById('fAsignado').value;
+  var asignados = getAsignadosSel();
   var filtros = [];
   if (proyectos.length) filtros.push('Proyecto: <b>'+escHtml(proyectos.join(', '))+'</b>');
-  if (asignado) filtros.push('Asignado a: <b>'+escHtml(asignado)+'</b>');
+  if (asignados.length) filtros.push('Asignado a: <b>'+escHtml(asignados.join(', '))+'</b>');
   var partes = [];
   partes.push('Sprint (semanal): <b>'+data.sprintCode+'</b> ('+fmtDateShort(data.rangeStart)+' – '+fmtDateShort(data.rangeEndBusiness)+', L-V)'+(filtros.length?' &middot; '+filtros.join(' &middot; '):''));
   partes.push('ETC pendiente ahora: <b>'+Math.round(data.pendienteETC)+'h</b>');
@@ -4997,16 +5153,16 @@ function renderHistoFull(){
   var data = computeHisto();
   document.getElementById('histoFull').innerHTML = buildHistoSVG(data, 560, 280, true);
   var proyectos = getProyectosSel();
-  var sprint = document.getElementById('fSprint').value;
+  var sprints = getSprintsSel();
   var estados = getEstadosSel();
-  var tipoTarea = document.getElementById('fTipoTarea').value;
-  var asignado = document.getElementById('fAsignado').value;
+  var tipos = getTiposSel();
+  var asignados = getAsignadosSel();
   var filtros = [];
   if (proyectos.length) filtros.push('Proyecto: <b>'+escHtml(proyectos.join(', '))+'</b>');
-  if (sprint) filtros.push('Sprint: <b>'+escHtml(sprint)+'</b>');
+  if (sprints.length) filtros.push('Sprint: <b>'+escHtml(sprints.join(', '))+'</b>');
   if (estados.length) filtros.push('Estado: <b>'+escHtml(estados.join(', '))+'</b>');
-  if (tipoTarea) filtros.push('Tipo: <b>'+escHtml(tipoTarea)+'</b>');
-  if (asignado) filtros.push('Asignado a: <b>'+escHtml(asignado)+'</b>');
+  if (tipos.length) filtros.push('Tipo: <b>'+escHtml(tipos.join(', '))+'</b>');
+  if (asignados.length) filtros.push('Asignado a: <b>'+escHtml(asignados.join(', '))+'</b>');
 
   var partes = [];
   partes.push(filtros.length ? 'Filtros aplicados: '+filtros.join(' &middot; ') : 'Sin filtros aplicados (todo el backlog cargado)');
@@ -5109,7 +5265,7 @@ function avisoConflicto(field, current){
 
 /* ── MODAL ─────────────────────────────── */
 var modalMode = 'pm'; /* 'pm' (Mis Proyectos, todas las pestañas) | 'team' (Mis Tareas, sin Planificar/Jerarquía — CC-034) */
-function openTaskModal(url, mode){
+function openTaskModal(url, mode, fromMentionCommentUrl){
   /* allTasksRaw, no allTasks: una tarea abierta desde "Mis Tareas" puede pertenecer a un proyecto
      donde CURRENT_USER no es PM/Director (por eso no está en allTasks, que sí está filtrado por
      proyectosVisibles()) — buscar solo en allTasks dejaba el modal sin abrir en ese caso. */
@@ -5117,6 +5273,13 @@ function openTaskModal(url, mode){
   if (!selectedTask) return;
   var t = selectedTask;
   modalMode = mode || 'pm';
+  /* fromMentionCommentUrl (a petición explícita de Javi): si el modal se abre desde el panel de
+     Menciones (ver viewMentionTask()), se recuerda aquí el commentUrl de esa mención para
+     marcarla como leída automáticamente al CERRAR el modal (ver listener 'close' de #taskModal,
+     más abajo). Cualquier otra apertura (tabla, Mis Tareas, un enlace de Jerarquía dentro del
+     propio modal, etc.) no pasa este 3er argumento, así que sobrescribe el valor anterior a null
+     — evita marcar por error una mención "vieja" si el usuario navega a otra tarea sin cerrar. */
+  _modalOpenedFromMentionUrl = fromMentionCommentUrl || null;
   /* Modal "enfocado a un usuario que no planifica" (CC-034, a petición explícita de Javi): desde
      "Mis Tareas" se ocultan Planificar y Jerarquía (reordenación de prioridad/sprint, tipo/padre)
      y se muestra en su lugar una Reasignar simple (solo cambia "Asignado a"), igual que el modal
@@ -5230,6 +5393,16 @@ function closeTaskModal(){
   document.getElementById('taskModal').close();
 }
 document.getElementById('taskModal').addEventListener('click', function(e){ if (e.target === this) closeTaskModal(); });
+/* Si el modal se abrió desde una mención (ver openTaskModal/viewMentionTask), marcarla como
+   leída al cerrarse — enganchado al evento nativo 'close' del <dialog>, no a closeTaskModal(),
+   para cubrir también el cierre por ESC (que no pasa por closeTaskModal(), mismo motivo que el
+   listener 'close' de #commentHistoryModal un poco más abajo). */
+document.getElementById('taskModal').addEventListener('close', function(){
+  if (_modalOpenedFromMentionUrl) {
+    markMentionReadByCommentUrl(_modalOpenedFromMentionUrl);
+    _modalOpenedFromMentionUrl = null;
+  }
+});
 
 function renderHierarchy(t){
   var parentCode = t['Tarea padre'];
@@ -6074,13 +6247,17 @@ async function actualizarPlan(btn){
     }
     await sqlUpdate('tareas', selectedTask.url, props);
     var partes = ['Prioridad '+oldPrio+' → '+nuevaPrio, 'Sprint '+(oldSprintNorm||'—')+' → '+(nuevoSprint||'—'), 'Sprint cliente '+(oldSprintCliente||'—')+' → '+(nuevoSprintCliente||'—')];
-    if (asignadoChanged) partes.push('Asignado a '+(oldAsignado||'—')+' → '+nuevoAsig);
+    if (asignadoChanged) partes.push('Asignado a '+(oldAsignado||'—')+' → @'+nuevoAsig);
     if (tallaChanged) {
       var tallaMsg = 'Talla '+(oldTalla||'—')+' → '+(nuevaTalla||'—');
       if (nuevaTalla) tallaMsg += ' (Estimación '+(oldEst!=null?oldEst+'h':'—')+' → '+nuevaEst+'h)';
       partes.push(tallaMsg);
     }
-    await auditComment(selectedTask.url, 'Planificación actualizada por '+CURRENT_USER+': '+partes.join(', ')+' · '+new Date().toLocaleString('es-ES'));
+    /* Notificación por mención (a petición explícita de Javi): un cambio de "Asignado a" desde
+       Planificación debe mencionar a la nueva persona asignada, para que le llegue al panel de
+       Menciones. */
+    var menPlan = asignadoChanged ? [nuevoAsig] : [];
+    await auditComment(selectedTask.url, 'Planificación actualizada por '+CURRENT_USER+': '+partes.join(', ')+' · '+new Date().toLocaleString('es-ES'), menPlan);
     selectedTask.Prioridad = nuevaPrio; selectedTask.Sprint = nuevoSprint; selectedTask['Sprint cliente'] = nuevoSprintCliente;
     if (asignadoChanged) selectedTask['Asignado a'] = nuevoAsig;
     if (tallaChanged) { selectedTask.Talla = nuevaTalla; if (nuevaTalla) selectedTask['Estimacion h'] = nuevaEst; }
@@ -6121,7 +6298,9 @@ async function reasignarTareaSimple(btn){
     var aidReasig = MAP_USUARIO_POR_NOMBRE[nuevoAsig] && MAP_USUARIO_POR_NOMBRE[nuevoAsig].url;
     if (!aidReasig) { showFb('reasignar','err','No se encontró a «'+nuevoAsig+'» en Usuarios'); return; }
     await sqlUpdate('tareas', selectedTask.url, { asignado_a_id: aidReasig });
-    await auditComment(selectedTask.url, 'Tarea reasignada de '+(oldAsignado||'—')+' → '+nuevoAsig+' por '+CURRENT_USER+' · '+new Date().toLocaleString('es-ES'));
+    /* Notificación por mención (a petición explícita de Javi): la reasignación simple también
+       debe mencionar a la nueva persona asignada. */
+    await auditComment(selectedTask.url, 'Tarea reasignada de '+(oldAsignado||'—')+' → @'+nuevoAsig+' por '+CURRENT_USER+' · '+new Date().toLocaleString('es-ES'), [nuevoAsig]);
     selectedTask['Asignado a'] = nuevoAsig;
     showFb('reasignar','ok','✓ Reasignada a '+nuevoAsig);
     document.getElementById('mBadges').innerHTML = estadoBadge(selectedTask.Estado)+' '+prioBadgeModal(selectedTask.Prioridad)+' '+tipoTareaBadge(selectedTask['Tipo de tarea'])+' '+asignadoChip(selectedTask['Asignado a']);
@@ -6264,7 +6443,13 @@ function closeMencionesPnl(){
 }
 
 function renderMencionesPnl(){
-  _mentionItems = allMentions.filter(function(m){ return !m.comment.leido; });
+  /* Orden por fecha/hora del comentario, de más reciente a más antiguo (a petición explícita de
+     Javi) — allMentions se va rellenando en el orden en que llegan los comentarios al cargar
+     (no necesariamente cronológico entre tareas distintas), así que se ordena aquí explícitamente
+     en vez de asumir el orden de inserción del array. */
+  _mentionItems = allMentions.filter(function(m){ return !m.comment.leido; }).sort(function(a,b){
+    return new Date(b.comment.date) - new Date(a.comment.date);
+  });
   var listEl = document.getElementById('mentionsList');
   if (!_mentionItems.length) {
     listEl.innerHTML = '<div class="mentions-empty">&#10003; Sin menciones sin leer</div>';
@@ -6283,6 +6468,28 @@ function renderMencionesPnl(){
       '</div>' +
     '</div>';
   }).join('');
+}
+
+/* Marca como leída la mención cuyo comentario es commentUrl (a petición explícita de Javi: al
+   cerrar #taskModal si se abrió desde una mención — ver openTaskModal/viewMentionTask/listener
+   'close' de #taskModal). Mismo efecto que markAsRead(), pero localizando la mención por
+   commentUrl en vez de por índice dentro de _mentionItems (el panel de Menciones puede estar
+   cerrado en este punto). */
+async function markMentionReadByCommentUrl(commentUrl){
+  if (!commentUrl) return;
+  var yaLeida = true;
+  allMentions.forEach(function(am){ if (am.comment.commentUrl === commentUrl && !am.comment.leido) yaLeida = false; });
+  if (yaLeida) return; /* ya se marcó desde el propio panel (botón "Marcar leído") o no hay mención que marcar */
+  try {
+    await sqlUpdate('comentarios', commentUrl, { leido: true });
+  } catch(e) { /* best-effort — actualizamos estado local igualmente */ }
+  allMentions.forEach(function(am){ if (am.comment.commentUrl === commentUrl) am.comment.leido = true; });
+  Object.keys(commentCache).forEach(function(tu){
+    (commentCache[tu]||[]).forEach(function(c){ if (c.commentUrl === commentUrl) c.leido = true; });
+  });
+  updateUnreadBadge();
+  var panel = document.getElementById('mentionsPanel');
+  if (panel && panel.classList.contains('open')) renderMencionesPnl();
 }
 
 async function markAsRead(idx){
@@ -6320,7 +6527,7 @@ function viewMentionTask(idx){
   closeMencionesPnl();
   var t = allTasksRaw.find(function(x){ return x.url === m.taskUrl; });
   var mode = (t && esPMoDirectorDeProyecto(t._proyectoUrl)) ? 'pm' : 'team';
-  openTaskModal(m.taskUrl, mode);
+  openTaskModal(m.taskUrl, mode, m.comment.commentUrl);
 }
 
 /* ── @ autocomplete ──────────────────────── */
@@ -6385,6 +6592,18 @@ document.addEventListener('click', function(e){
   var msEstMenu = document.getElementById('msEstadoMenu');
   if (msEstMenu && msEstMenu.classList.contains('open') && !e.target.closest('#msEstadoWrap')) {
     msEstMenu.classList.remove('open');
+  }
+  var msSprintMenu = document.getElementById('msSprintMenu');
+  if (msSprintMenu && msSprintMenu.classList.contains('open') && !e.target.closest('#msSprintWrap')) {
+    msSprintMenu.classList.remove('open');
+  }
+  var msTipoMenu = document.getElementById('msTipoMenu');
+  if (msTipoMenu && msTipoMenu.classList.contains('open') && !e.target.closest('#msTipoWrap')) {
+    msTipoMenu.classList.remove('open');
+  }
+  var msAsigMenu = document.getElementById('msAsignadoMenu');
+  if (msAsigMenu && msAsigMenu.classList.contains('open') && !e.target.closest('#msAsignadoWrap')) {
+    msAsigMenu.classList.remove('open');
   }
 });
 
@@ -6453,7 +6672,8 @@ function escAttr(s){ return String(s).replace(/'/g,"\\'"); }
    el navegador contra una lista fija de códigos) ahora lo aplica poblarSelectsSprint() en cuanto
    se cargan los sprints reales desde Supabase — ver loadSprints(). */
 function aplicarFiltrosPorDefecto(){
-  document.getElementById('fTipoTarea').value = '6. Tarea';
+  document.querySelectorAll('.ms-tipo-chk').forEach(function(chk){ if (chk.value === '6. Tarea') chk.checked = true; });
+  updateMsTipoBtnLabel();
 }
 aplicarFiltrosPorDefecto();
 
@@ -6621,7 +6841,7 @@ async function iniciarPanel(){
     setTimeout(function(){ showToast('🚧 Modo mantenimiento activo — has entrado como Administrador', 'err'); }, 900);
   }
 
-  /* Auto-refresco cada 5 minutos — recarga real de página (refrescarArtefactoCompleto(), la misma
+  /* Auto-refresco cada 10 minutos — recarga real de página (refrescarArtefactoCompleto(), la misma
      función del botón "Actualizar": guarda filtros/pestaña y hace location.reload()), no una
      llamada en segundo plano. Se omite mientras el modal de detalle de tarea (#taskModal) está
      abierto, para no interrumpir una edición en curso ni cerrar el modal bajo el usuario. No
@@ -6630,7 +6850,7 @@ async function iniciarPanel(){
     var dlg = document.getElementById('taskModal');
     if (dlg && dlg.open) return;
     refrescarArtefactoCompleto();
-  }, 5 * 60 * 1000);
+  }, 10 * 60 * 1000);
 }
 
 /* ══════════════════════════════════════════

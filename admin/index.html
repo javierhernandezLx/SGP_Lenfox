@@ -2318,7 +2318,7 @@ document.addEventListener('DOMContentLoaded', function(){
   });
 });
 
-/* ── Auto-refresco cada 5 minutos ────────────────────────────────────────────
+/* ── Auto-refresco cada 10 minutos ────────────────────────────────────────────
    Antes llamaba a loadAll() directamente y cada llamada a execute_sql en segundo
    plano (sin clic real) disparaba un diálogo de aprobación que se iba acumulando
    en pantalla si no se cerraba a tiempo. Javi observó que pulsar "Actualizar"
@@ -2330,7 +2330,7 @@ document.addEventListener('DOMContentLoaded', function(){
    nuevo (ver historial: se quitó una vez ya por este motivo). */
 setInterval(function(){
   if (!anyModalOpen()) refreshPanel();
-}, 5 * 60 * 1000);
+}, 10 * 60 * 1000);
 
 /* ══════════════════════════════════════════
    AUTENTICACIÓN (Supabase Auth) — sustituye al conector MCP de desarrollador.
