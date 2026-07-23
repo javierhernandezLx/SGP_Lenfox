@@ -2277,88 +2277,117 @@ function copiarTareaActual(){
   marcarCamposCopiados();
 
   _copiaOrigenCodigo = t.Codigo;
-  var subtareas = allTasks.filter(function(x){ return x.url !== t.url && String(x['Tarea padre']) === String(t.Codigo); });
+  /* obtenerDescendientes() (a petición explícita de Javi, 2026-07-23: la copia de subtareas debe
+     extenderse hasta los nodos hoja) — antes se contaban solo las subtareas DIRECTAS; el hint
+     debe reflejar la jerarquía completa que realmente se va a copiar, ver copiarSubtareasDe(). */
+  var descendientes = obtenerDescendientes(t.Codigo);
   var row = document.getElementById('ntCopiarSubtareasRow');
   document.getElementById('ntCopiarSubtareas').checked = false;
-  if (subtareas.length) {
+  if (descendientes.length) {
     row.style.display = 'block';
     document.getElementById('ntCopiarSubtareasHint').textContent =
-      'Esta tarea tiene '+subtareas.length+' subtarea'+(subtareas.length>1?'s':'')+'. Si marcas la casilla, se copiarán también, con la nueva tarea como padre.';
+      'Esta tarea tiene '+descendientes.length+' subtarea'+(descendientes.length>1?'s':'')+' contando todos los niveles. Si marcas la casilla, se copiará también toda esa jerarquía, con la nueva tarea como raíz.';
   } else {
     row.style.display = 'none';
   }
   showFb('nuevatarea','ok','Copiando de la tarea Nº '+t.Codigo+' — revisa los datos y pulsa "Crear tarea"');
 }
 
-/* Copia todas las subtareas directas de origenCodigo, dejando como Tarea padre la nueva tarea
-   copiada (nuevoPadreId: uuid real, pasado directamente por crearTarea() — ver nota más abajo
-   sobre el bug corregido). Mismo criterio de nombre ("Copiada de Tarea {código}..."), sin copiar
-   comentarios ni dedicaciones.
-   Crea TODAS las subtareas en un único INSERT multi-fila (mismo espíritu que la versión Notion,
-   que las creaba en una sola llamada a notion-create-pages) y TODOS sus comentarios de auditoría
-   en otro único INSERT — en vez de uno por subtarea. proyecto_id/asignado_a_id/sprint_id se
-   resuelven aquí desde los Nombres/código ya resueltos que trae cada `s` (ver loadData()). */
+/* Copia TODA la descendencia de origenCodigo (subtareas, subtareas de esas subtareas, y así
+   sucesivamente hasta los nodos hoja), colgando el primer nivel de la nueva tarea copiada
+   (nuevoPadreId: uuid real, pasado directamente por crearTarea()) y cada nivel siguiente de su
+   correspondiente copia recién creada — a petición explícita de Javi (2026-07-23): antes solo se
+   copiaba el nivel directo, así que una jerarquía de 3+ niveles perdía a los nietos en adelante.
+   Mismo criterio de nombre ("Copiada de Tarea {código}..."), sin copiar comentarios ni
+   dedicaciones.
+   Recorrido por NIVELES (anchura), no por rama: en cada vuelta del bucle se copian en un único
+   INSERT multi-fila TODAS las subtareas directas de TODOS los nodos ya copiados en el nivel
+   anterior (mismo espíritu que la versión de un solo nivel: un único INSERT por lote, no uno por
+   fila) — así el número de idas y vueltas a la red es la PROFUNDIDAD del árbol, no el número de
+   nodos. No se puede hacer en un único INSERT para todo el árbol de una vez porque cada nivel
+   necesita el uuid real que Postgres asigna a las filas del nivel anterior (tarea_padre_id).
+   proyecto_id/asignado_a_id/sprint_id se resuelven en cada nivel desde los Nombres/código ya
+   resueltos que trae cada tarea original (ver loadData()). Límite de seguridad MAX_PROFUNDIDAD:
+   ante datos corruptos (un ciclo Tarea padre que nunca debería poder darse por la propia UI, pero
+   sin una restricción de BD que lo impida) evita un bucle infinito. */
+var COPIA_SUBTAREAS_MAX_PROFUNDIDAD = 25;
 async function copiarSubtareasDe(origenCodigo, nuevoPadreId){
-  /* BUG corregido (a petición explícita de Javi, reportado 2026-07-23: "no copia las subtareas"):
-     antes esta función recibía el CÓDIGO de la tarea recién creada y resolvía su uuid con
-     idTareaPorCodigo(), que busca en allTasksRaw — la caché local ANTES de recargar. Como
-     crearTarea() llama a copiarSubtareasDe() antes de su await loadData() final, la tarea recién
-     creada todavía no existía en allTasksRaw, así que idTareaPorCodigo() devolvía null y todas
-     las "subtareas copiadas" se creaban con tarea_padre_id = null (huérfanas, no colgando de la
-     nueva tarea) — encontradas/creadas salían con número > 0 en el toast, pero no aparecían como
-     hijas de nada. Ahora se recibe directamente el uuid real (ya lo tiene crearTarea() desde el
-     INSERT de la tarea principal), sin pasar por ningún lookup en caché. */
-  var subtareas = allTasks.filter(function(x){ return String(x['Tarea padre']) === String(origenCodigo); });
-  if (!subtareas.length) return { encontradas: 0, creadas: 0, fallidas: [] };
+  var totalEncontradas = 0, totalCreadas = 0, fallidas = [];
+  var nivelActual = [{ origenCodigo: origenCodigo, nuevoPadreId: nuevoPadreId }];
+  var profundidad = 0;
 
-  var ahora = new Date().toISOString();
-  var filasValores = subtareas.map(function(s){
-    var estInicialSub = (s['Estimacion h']!=null && s['Estimacion h']!=='') ? s['Estimacion h'] : (s.Talla ? TALLA_HORAS[s.Talla] : null);
-    return {
-      nombre: 'Copiada de Tarea '+s.Codigo+(s.Nombre ? ': '+s.Nombre : ''),
-      tipo_tarea: s['Tipo de tarea'],
-      estado: 'Pendiente',
-      creado_por_id: CURRENT_USER_ID,
-      creado_el: ahora,
-      tarea_padre_id: nuevoPadreId,
-      proyecto_id: (MAP_PROYECTO_POR_NOMBRE[s.Proyecto] && MAP_PROYECTO_POR_NOMBRE[s.Proyecto].url) || null,
-      asignado_a_id: s['Asignado a'] ? ((MAP_USUARIO_POR_NOMBRE[s['Asignado a']] && MAP_USUARIO_POR_NOMBRE[s['Asignado a']].url) || null) : null,
-      descripcion: s.Descripcion || null,
-      sprint_cliente: s['Sprint cliente'] || null,
-      sprint_id: s.Sprint ? (MAP_SPRINT_POR_CODIGO[s.Sprint] || null) : null,
-      prioridad: (s.Prioridad != null && s.Prioridad !== '') ? Number(s.Prioridad) : null,
-      talla: s.Talla || null,
-      estimacion_h: estInicialSub, etc: estInicialSub, estimacion_actual: estInicialSub
-    };
-  });
+  while (nivelActual.length && !fallidas.length) {
+    profundidad++;
+    if (profundidad > COPIA_SUBTAREAS_MAX_PROFUNDIDAD) {
+      fallidas.push('Se alcanzó la profundidad máxima ('+COPIA_SUBTAREAS_MAX_PROFUNDIDAD+' niveles) copiando subtareas — posible ciclo en "Tarea padre"');
+      break;
+    }
 
-  var creadas = 0, fallidas = [], filasCreadas = [];
-  try {
-    var resIns = await sb.from('tareas').insert(filasValores).select('id, codigo, nombre');
-    if (resIns.error) throw resIns.error;
-    filasCreadas = resIns.data || [];
-    creadas = filasCreadas.length;
-  } catch(e) {
-    fallidas.push('Creación de subtareas: '+e.message);
-    return { encontradas: subtareas.length, creadas: 0, fallidas: fallidas };
-  }
+    /* itemsNivel: una entrada por cada subtarea directa de CUALQUIER nodo del nivel actual,
+       junto con el uuid de SU copia recién creada (el padre que le corresponde en este lote). */
+    var itemsNivel = [];
+    nivelActual.forEach(function(nodo){
+      var subs = allTasks.filter(function(x){ return String(x['Tarea padre']) === String(nodo.origenCodigo); });
+      subs.forEach(function(s){ itemsNivel.push({ s: s, nuevoPadreId: nodo.nuevoPadreId }); });
+    });
+    if (!itemsNivel.length) break; /* se llegó a los nodos hoja de todas las ramas */
+    totalEncontradas += itemsNivel.length;
 
-  /* Comentarios de auditoría de todas las subtareas creadas, también en un único INSERT. El orden
-     de filasCreadas se corresponde con el orden de subtareas (mismo orden en el VALUES). */
-  if (filasCreadas.length) {
-    var filasComentarios = filasCreadas.map(function(f, i){
+    var ahora = new Date().toISOString();
+    var filasValores = itemsNivel.map(function(it){
+      var s = it.s;
+      var estInicialSub = (s['Estimacion h']!=null && s['Estimacion h']!=='') ? s['Estimacion h'] : (s.Talla ? TALLA_HORAS[s.Talla] : null);
       return {
-        descripcion: SYS_MARKER+'Subtarea copiada de Tarea '+subtareas[i].Codigo+' por '+CURRENT_USER+' · '+new Date().toLocaleString('es-ES'),
-        tarea_id: f.id, autor_id: CURRENT_USER_ID, fecha: new Date().toISOString(), leido: false, tipo: 'Cambio de propiedad'
+        nombre: 'Copiada de Tarea '+s.Codigo+(s.Nombre ? ': '+s.Nombre : ''),
+        tipo_tarea: s['Tipo de tarea'],
+        estado: 'Pendiente',
+        creado_por_id: CURRENT_USER_ID,
+        creado_el: ahora,
+        tarea_padre_id: it.nuevoPadreId,
+        proyecto_id: (MAP_PROYECTO_POR_NOMBRE[s.Proyecto] && MAP_PROYECTO_POR_NOMBRE[s.Proyecto].url) || null,
+        asignado_a_id: s['Asignado a'] ? ((MAP_USUARIO_POR_NOMBRE[s['Asignado a']] && MAP_USUARIO_POR_NOMBRE[s['Asignado a']].url) || null) : null,
+        descripcion: s.Descripcion || null,
+        sprint_cliente: s['Sprint cliente'] || null,
+        sprint_id: s.Sprint ? (MAP_SPRINT_POR_CODIGO[s.Sprint] || null) : null,
+        prioridad: (s.Prioridad != null && s.Prioridad !== '') ? Number(s.Prioridad) : null,
+        talla: s.Talla || null,
+        estimacion_h: estInicialSub, etc: estInicialSub, estimacion_actual: estInicialSub
       };
     });
+
+    var filasCreadas = [];
     try {
-      var resCom = await sb.from('comentarios').insert(filasComentarios);
-      if (resCom.error) throw resCom.error;
-    } catch(e) { /* best-effort, igual que auditComment() */ }
+      var resIns = await sb.from('tareas').insert(filasValores).select('id, codigo, nombre');
+      if (resIns.error) throw resIns.error;
+      filasCreadas = resIns.data || [];
+      totalCreadas += filasCreadas.length;
+    } catch(e) {
+      fallidas.push('Creación de subtareas (nivel '+profundidad+'): '+e.message);
+      break;
+    }
+
+    /* Comentarios de auditoría de todas las subtareas creadas EN ESTE NIVEL, también en un único
+       INSERT. El orden de filasCreadas se corresponde con el orden de itemsNivel (mismo orden en
+       el VALUES) — mismo supuesto que ya asumía la versión de un solo nivel. */
+    if (filasCreadas.length) {
+      var filasComentarios = filasCreadas.map(function(f, i){
+        return {
+          descripcion: SYS_MARKER+'Subtarea copiada de Tarea '+itemsNivel[i].s.Codigo+' por '+CURRENT_USER+' · '+new Date().toLocaleString('es-ES'),
+          tarea_id: f.id, autor_id: CURRENT_USER_ID, fecha: new Date().toISOString(), leido: false, tipo: 'Cambio de propiedad'
+        };
+      });
+      try {
+        var resCom = await sb.from('comentarios').insert(filasComentarios);
+        if (resCom.error) throw resCom.error;
+      } catch(e) { /* best-effort, igual que auditComment() */ }
+    }
+
+    /* Siguiente nivel: cada subtarea original recién copiada pasa a ser "origen" para buscar SUS
+       propias subtareas, con la fila que se acaba de crear como nuevo padre. */
+    nivelActual = filasCreadas.map(function(f, i){ return { origenCodigo: itemsNivel[i].s.Codigo, nuevoPadreId: f.id }; });
   }
 
-  return { encontradas: subtareas.length, creadas: creadas, fallidas: fallidas };
+  return { encontradas: totalEncontradas, creadas: totalCreadas, fallidas: fallidas };
 }
 
 async function crearTarea(btn){
