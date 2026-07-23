@@ -240,6 +240,15 @@ tfoot td.tf-label{text-align:right;color:var(--text3);font-weight:700;text-trans
 #dedicListModal::backdrop{background:rgba(0,0,0,.6);backdrop-filter:blur(2px);}
 #dedicListModal .modal-body{overflow-y:auto;}
 
+#commentHistoryModal{border:none;border-radius:12px;padding:0;width:min(720px,94vw);height:82vh;max-height:82vh;
+  background:var(--surface);color:var(--text);box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden;
+  position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);margin:0;}
+#commentHistoryModal[open]{display:flex;flex-direction:column;}
+#commentHistoryModal::backdrop{background:rgba(0,0,0,.55);backdrop-filter:blur(3px);}
+#commentHistoryModal .modal-body{display:flex;flex-direction:column;overflow:hidden;padding:16px 18px;}
+#commentHistoryModal .comments-section{border-top:none;padding:0;position:relative;flex:0 0 auto;}
+#commentHistoryModal .comment-history{flex:1 1 auto;max-height:none;overflow-y:auto;margin-top:10px;}
+
 #dedicEditModal{border:none;border-radius:12px;padding:0;width:min(480px,92vw);
   background:var(--surface);color:var(--text);box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden;
   position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);margin:0;}
@@ -1230,7 +1239,10 @@ setTimeout(function(){
     </div>
 
     <div class="comments-section">
-      <div class="comments-hdr">&#128172; Comentarios</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="comments-hdr" style="margin-bottom:0">&#128172; Comentarios</div>
+        <button type="button" class="btn-action" style="width:auto;padding:4px 10px;font-size:10.5px;background:var(--surface2);color:var(--text2)" onclick="openCommentHistoryModal()" title="Ver el historial completo en una ventana más grande">&#10530; Ampliar</button>
+      </div>
       <textarea class="form-control" id="txtComentario" placeholder="Escribe un comentario… (usa @ para mencionar)" rows="2" style="resize:none;font-size:12px" oninput="handleTextareaInput(this)"></textarea>
       <div class="mention-dropdown" id="mentionDropdown"></div>
       <div style="margin-top:7px">
@@ -1238,12 +1250,40 @@ setTimeout(function(){
         <span class="feedback" id="fb-comentario" style="display:none"></span>
       </div>
       <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2);margin-top:8px;cursor:pointer">
-        <input type="checkbox" id="chkShowSystem" onchange="renderCommentHistory(commentCache[selectedTask.url]||[])">
+        <input type="checkbox" id="chkShowSystem" onchange="onToggleShowSystem(this)">
         Mostrar cambios de propiedades
       </label>
       <div id="commentHistory" class="comment-history">
         <div class="comment-loading">Selecciona una tarea…</div>
       </div>
+    </div>
+  </div>
+</dialog>
+
+<!-- ══ COMENTARIOS — HISTORIAL AMPLIADO (a petición de Javi, 2026-07-23) ══════════════════════ -->
+<dialog id="commentHistoryModal">
+  <div class="modal-hdr">
+    <div class="modal-hdr-info">
+      <div class="modal-code" id="chExpCode">Tarea Nº —</div>
+      <div class="modal-title" id="chExpNombre">&#128172; Historial de comentarios</div>
+    </div>
+    <button class="modal-close" onclick="closeCommentHistoryModal()" title="Cerrar (ESC)">&#10005;</button>
+  </div>
+  <div class="modal-body">
+    <div class="comments-section">
+      <textarea class="form-control" id="txtComentarioExp" placeholder="Escribe un comentario… (usa @ para mencionar)" rows="2" style="resize:none;font-size:12px" oninput="handleTextareaInput(this,'Exp')"></textarea>
+      <div class="mention-dropdown" id="mentionDropdownExp"></div>
+      <div style="margin-top:7px">
+        <button class="btn-action btn-green" style="width:auto;padding:7px 14px;font-size:12px" onclick="addComment(this,'Exp')">Publicar comentario</button>
+        <span class="feedback" id="fb-comentarioExp" style="display:none"></span>
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2);margin-top:8px;cursor:pointer">
+        <input type="checkbox" id="chkShowSystemExp" onchange="onToggleShowSystem(this)">
+        Mostrar cambios de propiedades
+      </label>
+    </div>
+    <div id="commentHistoryExp" class="comment-history">
+      <div class="comment-loading">Selecciona una tarea…</div>
     </div>
   </div>
 </dialog>
@@ -1642,6 +1682,17 @@ var SYS_MARKER    = '⚙SYS⚙ '; /* marca invisible en el texto para distinguir
 var TALLA_HORAS   = { XS:3, S:7, M:13, L:24, XL:50 };
 var editingDedicacion = null; /* dedicación en edición (objeto) o null si estamos registrando una nueva */
 var editingCommentUrl = null; /* url del comentario en edición o null */
+/* Historial de comentarios ampliado (a petición de Javi, 2026-07-23: "juraría que habíamos
+   implementado una pantalla modal... para ver mejor y de manera ampliada el historial"). Se
+   añade un segundo contenedor (#commentHistoryModal, sufijo 'Exp' en ids) con el MISMO
+   comportamiento que el recuadro pequeño del modal de tarea: publicar/editar comentarios y
+   ocultar trazas del sistema. editingCommentContainer guarda en cuál de los dos contenedores
+   ('' o 'Exp') está abierta la edición, para no colisionar ids si algún día ambos llegaran a
+   pintarse a la vez. Los dos checkboxes "Mostrar cambios de propiedades" se mantienen
+   sincronizados (onToggleShowSystem), así que _visibleCommentsCache puede seguir siendo un único
+   array compartido: el filtro aplicado es siempre el mismo venga el clic de "Editar" de donde
+   venga. */
+var editingCommentContainer = ''; /* '' (recuadro del modal de tarea) | 'Exp' (historial ampliado) */
 var _visibleCommentsCache = []; /* último array de comentarios renderizado (para editar por índice) */
 
 var allTasks = [];
@@ -4931,8 +4982,20 @@ function openTaskModal(url, mode){
   var tabsOcultasEnEsteModo = (modalMode==='team') ? ['plan','jerarquia'] : ['reasignar'];
   switchTab(tabsOcultasEnEsteModo.indexOf(activeTab) !== -1 ? 'estado' : activeTab);
   var histEl = document.getElementById('commentHistory');
+  /* Si el historial ampliado (commentHistoryModal) está abierto al saltar a OTRA tarea (p.ej.
+     clic en un enlace de Jerarquía dentro del propio modal, que reutiliza este mismo taskModal
+     sin cerrarlo), se refresca también su cabecera y su contenido para que no se quede mostrando
+     la tarea anterior. */
+  var expDlgOnOpen = document.getElementById('commentHistoryModal');
+  if (expDlgOnOpen && expDlgOnOpen.open) {
+    document.getElementById('chExpCode').textContent = 'Tarea Nº ' + (t.Codigo != null ? t.Codigo : '—');
+    document.getElementById('chExpNombre').textContent = t.Nombre || 'Historial de comentarios';
+    document.getElementById('txtComentarioExp').value = '';
+    hideMentionDropdown('Exp');
+  }
   if (commentCache[t.url] === undefined) {
     histEl.innerHTML = '<div class="comment-loading">Cargando comentarios…</div>';
+    if (expDlgOnOpen && expDlgOnOpen.open) document.getElementById('commentHistoryExp').innerHTML = '<div class="comment-loading">Cargando comentarios…</div>';
   } else {
     renderCommentHistory(commentCache[t.url]);
   }
@@ -4940,7 +5003,10 @@ function openTaskModal(url, mode){
   var dlg = document.getElementById('taskModal');
   if (!dlg.open) dlg.showModal();
 }
-function closeTaskModal(){ document.getElementById('taskModal').close(); }
+function closeTaskModal(){
+  closeCommentHistoryModal();
+  document.getElementById('taskModal').close();
+}
 document.getElementById('taskModal').addEventListener('click', function(e){ if (e.target === this) closeTaskModal(); });
 
 function renderHierarchy(t){
@@ -5474,9 +5540,15 @@ function puedeEditarComentario(c){
 }
 
 function renderCommentHistory(comments){
-  var histEl = document.getElementById('commentHistory');
+  _renderCommentHistoryInto(comments, '');
+  var expDlg = document.getElementById('commentHistoryModal');
+  if (expDlg && expDlg.open) _renderCommentHistoryInto(comments, 'Exp');
+}
+function _renderCommentHistoryInto(comments, suffix){
+  var histEl = document.getElementById('commentHistory'+suffix);
+  if (!histEl) return;
   var showSystem = true;
-  var chk = document.getElementById('chkShowSystem');
+  var chk = document.getElementById('chkShowSystem'+suffix);
   if (chk) showSystem = chk.checked;
   var visible = showSystem ? comments : comments.filter(function(c){ return !c.isSystem; });
   _visibleCommentsCache = visible;
@@ -5486,17 +5558,17 @@ function renderCommentHistory(comments){
   }
   histEl.innerHTML = visible.map(function(c,i){
     var bg = i%2===0 ? 'transparent' : 'var(--surface2)';
-    var isEditing = editingCommentUrl && c.commentUrl === editingCommentUrl;
+    var isEditing = editingCommentUrl && c.commentUrl === editingCommentUrl && editingCommentContainer === suffix;
     var body;
     if (isEditing) {
-      body = '<textarea class="form-control" id="editCommentTxt-'+i+'" rows="2" style="font-size:11px;margin-top:3px;resize:vertical">'+escHtml(c.text||'')+'</textarea>' +
+      body = '<textarea class="form-control" id="editCommentTxt'+suffix+'-'+i+'" rows="2" style="font-size:11px;margin-top:3px;resize:vertical">'+escHtml(c.text||'')+'</textarea>' +
         '<div style="margin-top:4px">' +
           '<button class="btn-action btn-blue" style="width:auto;padding:3px 9px;font-size:10px" onclick="guardarEdicionComentario('+i+',this)">Guardar</button> ' +
           '<button class="btn-action" style="width:auto;padding:3px 9px;font-size:10px;background:var(--surface2);color:var(--text2)" onclick="cancelarEdicionComentario()">Cancelar</button>' +
         '</div>';
     } else {
       body = '<div style="color:var(--text)">'+linkifyAndMention(c.text||'')+'</div>' +
-        (puedeEditarComentario(c) ? '<a href="#" style="font-size:10px;color:var(--primary);text-decoration:underline" onclick="iniciarEdicionComentario('+i+');return false;">Editar</a>' : '');
+        (puedeEditarComentario(c) ? '<a href="#" style="font-size:10px;color:var(--primary);text-decoration:underline" onclick="iniciarEdicionComentario('+i+',\''+suffix+'\');return false;">Editar</a>' : '');
     }
     return '<div style="padding:7px 10px;background:'+bg+';border-bottom:1px solid var(--border);font-size:11px">' +
       '<div style="color:var(--text3);margin-bottom:2px">'+escHtml(fmtDateTime(c.date))+' &middot; <b>'+escHtml(c.author||'?')+'</b>'+(c.isSystem?' <span class="comment-tag-sys">&#9881; Cambio de propiedad</span>':'')+'</div>' +
@@ -5504,33 +5576,69 @@ function renderCommentHistory(comments){
     '</div>';
   }).join('');
 }
+/* Mantiene sincronizados los dos checkboxes "Mostrar cambios de propiedades" (recuadro normal y
+   ampliado) — así el filtro aplicado es siempre el mismo y _visibleCommentsCache (compartida)
+   apunta a los mismos comentarios independientemente de desde dónde se edite. */
+function onToggleShowSystem(sourceChk){
+  var val = sourceChk.checked;
+  ['chkShowSystem','chkShowSystemExp'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (el && el !== sourceChk) el.checked = val;
+  });
+  renderCommentHistory(commentCache[selectedTask.url] || []);
+}
+function openCommentHistoryModal(){
+  if (!selectedTask) return;
+  var t = selectedTask;
+  document.getElementById('chExpCode').textContent = 'Tarea Nº ' + (t.Codigo != null ? t.Codigo : '—');
+  document.getElementById('chExpNombre').textContent = t.Nombre || 'Historial de comentarios';
+  document.getElementById('commentHistoryModal').showModal();
+  renderCommentHistory(commentCache[selectedTask.url] || []);
+}
+function closeCommentHistoryModal(){
+  var dlg = document.getElementById('commentHistoryModal');
+  if (dlg && dlg.open) dlg.close();
+  if (editingCommentContainer === 'Exp'){ editingCommentUrl = null; editingCommentContainer = ''; }
+}
+/* Cierre por ESC (nativo de <dialog>) no pasa por closeCommentHistoryModal() — mismo cleanup
+   por si se quedó editando un comentario sin guardar. */
+(function(){
+  var _chDlg = document.getElementById('commentHistoryModal');
+  if (_chDlg) _chDlg.addEventListener('close', function(){
+    if (editingCommentContainer === 'Exp'){ editingCommentUrl = null; editingCommentContainer = ''; }
+  });
+})();
 
-function iniciarEdicionComentario(i){
+function iniciarEdicionComentario(i, suffix){
   var c = _visibleCommentsCache[i];
   if (!c || !puedeEditarComentario(c)) return;
   editingCommentUrl = c.commentUrl;
+  editingCommentContainer = suffix || '';
   renderCommentHistory(commentCache[selectedTask.url] || []);
 }
 function cancelarEdicionComentario(){
   editingCommentUrl = null;
+  editingCommentContainer = '';
   renderCommentHistory(commentCache[selectedTask.url] || []);
 }
 async function guardarEdicionComentario(i, btn){
   var c = _visibleCommentsCache[i];
   if (!c) return;
-  var ta = document.getElementById('editCommentTxt-'+i);
+  var suf = editingCommentContainer;
+  var ta = document.getElementById('editCommentTxt'+suf+'-'+i);
   var nuevoTexto = ta.value.trim();
-  if (!nuevoTexto) { showFb('comentario','err','El comentario no puede quedar vacío'); return; }
+  if (!nuevoTexto) { showFb('comentario'+suf,'err','El comentario no puede quedar vacío'); return; }
   var orig = btn.textContent; btn.disabled = true; btn.textContent = '...';
   try {
     await sqlUpdate('comentarios', c.commentUrl, { descripcion: nuevoTexto });
     c.text = nuevoTexto;
     editingCommentUrl = null;
-    showFb('comentario','ok','✓ Comentario actualizado');
+    editingCommentContainer = '';
+    showFb('comentario'+suf,'ok','✓ Comentario actualizado');
     renderCommentHistory(commentCache[selectedTask.url] || []);
   } catch(e) {
     btn.disabled = false; btn.textContent = orig;
-    showFb('comentario','err','✗ '+e.message);
+    showFb('comentario'+suf,'err','✗ '+e.message);
   }
 }
 
@@ -5883,21 +5991,22 @@ async function actualizarJerarquia(btn){
 /* reasignarTarea() se retira: la reasignación de persona se fusiona en actualizarPlan(),
    dentro de la pestaña "Planificar" (antes "Prioridad" + "Reasignar" por separado). */
 
-async function addComment(btn){
+async function addComment(btn, suffix){
+  suffix = suffix || '';
   if (!selectedTask) return;
-  var text = document.getElementById('txtComentario').value.trim();
-  if (!text) { showFb('comentario','err','El comentario no puede estar vacío'); return; }
+  var text = document.getElementById('txtComentario'+suffix).value.trim();
+  if (!text) { showFb('comentario'+suffix,'err','El comentario no puede estar vacío'); return; }
   var orig = btn.textContent; btn.disabled=true; btn.textContent='Publicando...';
-  showFb('comentario','','');
-  hideMentionDropdown();
+  showFb('comentario'+suffix,'','');
+  hideMentionDropdown(suffix);
   try {
     var menciones = TEAM_MEMBERS.filter(function(m){ return (new RegExp('@'+m+'\\b','i')).test(text); });
     await auditComment(selectedTask.url, text, menciones, false);
-    document.getElementById('txtComentario').value = '';
-    showFb('comentario','ok','✓ Comentario guardado'+(menciones.length?' (menciones: @'+menciones.join(', @')+')':''));
+    document.getElementById('txtComentario'+suffix).value = '';
+    showFb('comentario'+suffix,'ok','✓ Comentario guardado'+(menciones.length?' (menciones: @'+menciones.join(', @')+')':''));
     renderCommentHistory(commentCache[selectedTask.url] || []);
     renderMisTareas(); /* refleja el nuevo comentario en la vista previa de la tarjeta, si la tarea es mía */
-  } catch(e) { showFb('comentario','err','✗ '+e.message); }
+  } catch(e) { showFb('comentario'+suffix,'err','✗ '+e.message); }
   finally { btn.disabled=false; btn.textContent=orig; }
 }
 
@@ -5993,11 +6102,11 @@ function viewMentionTask(idx){
 }
 
 /* ── @ autocomplete ──────────────────────── */
-function handleTextareaInput(el){
+function handleTextareaInput(el, suffix){
   var before = el.value.slice(0, el.selectionStart);
   var match = before.match(/@(\w*)$/);
-  if (match) { showMentionDropdown(match[1].toLowerCase()); }
-  else { hideMentionDropdown(); }
+  if (match) { showMentionDropdown(match[1].toLowerCase(), suffix); }
+  else { hideMentionDropdown(suffix); }
 }
 /* Personas que se ofrecen al escribir "@" en un comentario (a petición explícita de Javi: antes
    salía TEAM_MEMBERS entera, es decir, TODOS los usuarios de la app, sin importar si tenían nada
@@ -6011,23 +6120,25 @@ function mentionCandidates(){
   if (!nombres.length) nombres = TEAM_MEMBERS;
   return nombres;
 }
-function showMentionDropdown(search){
+function showMentionDropdown(search, suffix){
+  suffix = suffix || '';
   var filtered = mentionCandidates().filter(function(m){ return m.toLowerCase().startsWith(search); });
-  var dd = document.getElementById('mentionDropdown');
-  if (!filtered.length || !dd) { hideMentionDropdown(); return; }
+  var dd = document.getElementById('mentionDropdown'+suffix);
+  if (!filtered.length || !dd) { hideMentionDropdown(suffix); return; }
   dd.innerHTML = filtered.map(function(m){
     var initials = m.slice(0,2).toUpperCase();
-    return '<div class="mention-opt" onclick="insertMention(\''+m+'\')">' +
+    return '<div class="mention-opt" onclick="insertMention(\''+m+'\',\''+suffix+'\')">' +
       '<div class="mention-opt-av">'+initials+'</div><span>@'+escHtml(m)+'</span></div>';
   }).join('');
   dd.style.display = 'block';
 }
-function hideMentionDropdown(){
-  var dd = document.getElementById('mentionDropdown');
+function hideMentionDropdown(suffix){
+  var dd = document.getElementById('mentionDropdown'+(suffix||''));
   if (dd) dd.style.display = 'none';
 }
-function insertMention(name){
-  var el = document.getElementById('txtComentario');
+function insertMention(name, suffix){
+  suffix = suffix || '';
+  var el = document.getElementById('txtComentario'+suffix);
   if (!el) return;
   var before = el.value.slice(0, el.selectionStart);
   var after = el.value.slice(el.selectionStart);
@@ -6035,14 +6146,16 @@ function insertMention(name){
   el.value = newBefore + after;
   el.selectionStart = el.selectionEnd = newBefore.length;
   el.focus();
-  hideMentionDropdown();
+  hideMentionDropdown(suffix);
 }
 document.addEventListener('click', function(e){
-  var ta = document.getElementById('txtComentario');
-  var dd = document.getElementById('mentionDropdown');
-  if (dd && ta && !e.target.closest('#txtComentario') && !e.target.closest('#mentionDropdown')) {
-    hideMentionDropdown();
-  }
+  ['', 'Exp'].forEach(function(suf){
+    var ta = document.getElementById('txtComentario'+suf);
+    var dd = document.getElementById('mentionDropdown'+suf);
+    if (dd && ta && !e.target.closest('#txtComentario'+suf) && !e.target.closest('#mentionDropdown'+suf)) {
+      hideMentionDropdown(suf);
+    }
+  });
   var msMenu = document.getElementById('msProyectoMenu');
   if (msMenu && msMenu.classList.contains('open') && !e.target.closest('#msProyectoWrap')) {
     msMenu.classList.remove('open');
