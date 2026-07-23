@@ -1583,6 +1583,14 @@ setTimeout(function(){
     </div>
     <div class="hint" id="beCapacidadInfo" style="margin:-6px 0 10px"></div>
     <div class="form-group">
+      <label class="form-label">Tipo de tarea</label>
+      <select id="beTipoTarea" class="form-control">
+        <option value="">— no cambiar —</option>
+        <option>1. Cuenta de control</option><option>2. Paquete de trabajo</option><option>3. Épica</option>
+        <option>4. Funcionalidad</option><option>5. Historia de usuario</option><option>6. Tarea</option>
+      </select>
+    </div>
+    <div class="form-group">
       <label class="form-label">Tarea padre (código)</label>
       <input type="number" id="beTareaPadre" class="form-control" placeholder="dejar vacío = no cambiar">
       <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;cursor:pointer;font-weight:400">
@@ -4015,7 +4023,7 @@ function openBulkEditModal(){  var n = Object.keys(seleccionadas).length;
   if (!n) return;
   document.getElementById('bulkEditCount').textContent = 'Los cambios se aplicarán a '+n+' tarea'+(n!==1?'s':'')+' seleccionada'+(n!==1?'s':'')+'. Solo se modifican los campos que elijas a continuación.';
   poblarBeAsignadoPorSeleccion();
-  ['beProyecto','beSprint','beAsignado','beTareaPadre','beFechaInicio','beFechaFin','beFechaLimite','beEstado'].forEach(function(id){ document.getElementById(id).value=''; });
+  ['beProyecto','beSprint','beAsignado','beTareaPadre','beFechaInicio','beFechaFin','beFechaLimite','beEstado','beTipoTarea'].forEach(function(id){ document.getElementById(id).value=''; });
   document.getElementById('beSprintCliente').value = '';
   document.getElementById('beTareaPadreQuitar').checked = false;
   document.getElementById('beTareaPadre').disabled = false;
@@ -4042,6 +4050,7 @@ async function aplicarEdicionMasiva(btn){
   var sprint = document.getElementById('beSprint').value;
   var sprintCliente = document.getElementById('beSprintCliente').value.trim();
   var estado = document.getElementById('beEstado').value;
+  var tipoTarea = document.getElementById('beTipoTarea').value;
   var asignado = document.getElementById('beAsignado').value;
   var tareaPadre = document.getElementById('beTareaPadre').value;
   var tareaPadreQuitar = document.getElementById('beTareaPadreQuitar').checked;
@@ -4074,6 +4083,7 @@ async function aplicarEdicionMasiva(btn){
      explícita de Javi: esa transición implica borrado en cascada de subtareas (ver cambiarEstado())
      y no se replica aquí para evitar un borrado masivo accidental sobre un lote grande. */
   if (estado) { camposSql.estado = estado; resumenCambios.push('Estado → '+estado); }
+  if (tipoTarea) { camposSql.tipo_tarea = tipoTarea; resumenCambios.push('Tipo de tarea → '+tipoTarea); }
   if (asignado) {
     if (asignado === '__CLEAR__') { camposSql.asignado_a_id = null; resumenCambios.push('Persona asignada → (sin asignar)'); }
     else { var aid = MAP_USUARIO_POR_NOMBRE[asignado] && MAP_USUARIO_POR_NOMBRE[asignado].url; if (aid) { camposSql.asignado_a_id = aid; resumenCambios.push('Persona asignada → '+asignado); } }
