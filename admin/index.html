@@ -360,7 +360,7 @@ dialog.modal::backdrop{background:rgba(0,0,0,.52);backdrop-filter:blur(3px);}
     </div>
     <div class="hdr-title">
       <div class="sub">SGP-Lenfox</div>
-      <h1>Panel de Administraci&oacute;n</h1>
+      <h1>Panel de Administraci&oacute;n <span id="envBadge" style="display:inline-block;margin-left:6px;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;vertical-align:middle;letter-spacing:.3px;"></span></h1>
     </div>
   </div>
   <div class="hdr-right">
@@ -375,9 +375,6 @@ dialog.modal::backdrop{background:rgba(0,0,0,.52);backdrop-filter:blur(3px);}
     <button class="btn-refresh" onclick="openPasswordModal()">&#128273; Contraseña</button>
     <button class="btn-refresh" id="btnLogout" onclick="doLogout()">&#128274; Salir</button>
   </div>
-</div>
-<div style="background:#f59e0b;color:#1a2332;text-align:center;padding:8px 14px;font-size:12.5px;font-weight:700;letter-spacing:.2px;">
-  &#9888; PILOTO — publicación web del SGP-Lenfox. Conectado directamente a Supabase con tu sesión real. No sustituye aún al panel de producción en Notion.
 </div>
 
 <!-- ══ TABS ════════════════════════════════ -->
@@ -713,6 +710,25 @@ dialog.modal::backdrop{background:rgba(0,0,0,.52);backdrop-filter:blur(3px);}
 var SUPABASE_URL = 'https://miemhxxytdovhpckpqsq.supabase.co';
 var SUPABASE_ANON_KEY = 'sb_publishable_IavIJA1_cDD_ABj-6htjtg_hKiy9TWP';
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+var _envRef = (SUPABASE_URL.match(/https:\/\/([a-z0-9]+)\.supabase\.co/)||[])[1] || '?';
+var _envIsProd = _envRef === 'miemhxxytdovhpckpqsq';
+(function(){
+  var _el = document.getElementById('envBadge');
+  if(!_el) return;
+  if(_envIsProd){
+    _el.style.background = '#16a34a';
+    _el.style.color = '#ffffff';
+    _el.textContent = 'MAIN';
+    _el.title = 'Producción — datos reales de Lenfox';
+  } else {
+    _el.style.background = '#f59e0b';
+    _el.style.color = '#1a2332';
+    _el.textContent = 'DEV';
+    _el.title = 'Entorno de desarrollo — conectado a la rama Supabase «' + _envRef + '», no a producción';
+  }
+})();
+
 var ROLE_NAMES   = ['Director', 'Project Manager', 'Project Team'];
 
 var darkMode = false;
