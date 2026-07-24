@@ -376,9 +376,7 @@ dialog.modal::backdrop{background:rgba(0,0,0,.52);backdrop-filter:blur(3px);}
     <button class="btn-refresh" id="btnLogout" onclick="doLogout()">&#128274; Salir</button>
   </div>
 </div>
-<div style="background:#f59e0b;color:#1a2332;text-align:center;padding:8px 14px;font-size:12.5px;font-weight:700;letter-spacing:.2px;">
-  &#9888; PILOTO — publicación web del SGP-Lenfox. Conectado directamente a Supabase con tu sesión real. No sustituye aún al panel de producción en Notion.
-</div>
+<div id="envBanner" style="text-align:center;padding:8px 14px;font-size:12.5px;font-weight:700;letter-spacing:.2px;"></div>
 
 <!-- ══ TABS ════════════════════════════════ -->
 <div class="tabbar">
@@ -713,6 +711,23 @@ dialog.modal::backdrop{background:rgba(0,0,0,.52);backdrop-filter:blur(3px);}
 var SUPABASE_URL = 'https://robwuwykqasmdhhvuicj.supabase.co';
 var SUPABASE_ANON_KEY = 'sb_publishable_QdwGBnz4RClMrUFE3LQ_-A_eZhYr9Jm';
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+var _envRef = (SUPABASE_URL.match(/https:\/\/([a-z0-9]+)\.supabase\.co/)||[])[1] || '?';
+var _envIsProd = _envRef === 'miemhxxytdovhpckpqsq';
+(function(){
+  var _el = document.getElementById('envBanner');
+  if(!_el) return;
+  if(_envIsProd){
+    _el.style.background = '#16a34a';
+    _el.style.color = '#ffffff';
+    _el.innerHTML = '&#128994; PRODUCCI\u00d3N \u2014 datos reales de Lenfox';
+  } else {
+    _el.style.background = '#f59e0b';
+    _el.style.color = '#1a2332';
+    _el.innerHTML = '&#128295; ENTORNO DE DESARROLLO \u2014 conectado a la rama Supabase \u00ab' + _envRef + '\u00bb, NO a producci\u00f3n';
+  }
+})();
+
 var ROLE_NAMES   = ['Director', 'Project Manager', 'Project Team'];
 
 var darkMode = false;
